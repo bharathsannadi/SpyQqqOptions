@@ -37,7 +37,7 @@ dashboard shows a red "updated 140s ago" pill.
    - `§22 vol_edge` — `0.45·HV5 + 0.35·IV30 + 0.20·HV30 > IV30 + 1pt`; missing IV refuses
    - contract gates from `contracts.select`: `§3 dte`, `§9 liquidity` (OI, two-sided
      quote), `§9 spread_cost` (both legs' quote width ≤ 10% of debit), `§5 spread_ratio`
-     (debit 25–45% of width)
+     (debit 25–45% of width; long 2–3 OTM on a 5-wide, per the option-cache measurement)
    - `§4 day_risk` — `risk.DayState.can_enter`: per-trade cap, daily budget, trade count,
      max open, loss halt, operator HALT file
    - `debate` — bull / bear / judge on Opus 5.5; fails **closed** on any error

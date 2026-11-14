@@ -14,19 +14,21 @@ def _c(strike, bid, ask, exp=date(2026, 11, 27), oi=1500):
                     opt_type="call", oi=oi, bid=bid, ask=ask)
 
 
-def test_picks_atm_long_and_two_wide_short_passing_all_gates():
+def test_picks_otm_long_and_five_wide_short_passing_all_gates():
     spot, today = 100.4, date(2026, 11, 13)
-    chain = [_c(99, 2.30, 2.33), _c(100, 1.62, 1.64), _c(101, 1.05, 1.07), _c(102, 0.62, 0.64),
-             _c(103, 0.34, 0.35), _c(104, 0.17, 0.18)]
+    # realistic-ish 7-21 DTE call ladder around 100: ATM ~2.6, decaying outward
+    px = {100: 2.60, 101: 2.10, 102: 1.65, 103: 1.28, 104: 0.97, 105: 0.72, 106: 0.52,
+          107: 0.37, 108: 0.26, 109: 0.18}
+    chain = [_c(k, v, round(v + 0.02, 2)) for k, v in px.items()]
     cand = contracts.select(FakeBroker(chain), "SPY", "bull", spot, today)
-    assert cand is not None and cand.ok
-    assert cand.long.strike == 101 and cand.short.strike == 103 and cand.width == 2
-    assert 0.25 * 2 <= cand.net_debit <= 0.45 * 2
+    assert cand is not None and cand.ok, [g for g in cand.gates if not g["ok"]]
+    assert cand.long.strike == 103 and cand.short.strike == 108 and cand.width == 5
+    assert 0.25 * 5 <= cand.net_debit <= 0.45 * 5
 
 
 def test_returns_closest_failure_with_gate_text_when_illiquid():
     spot, today = 100.4, date(2026, 11, 13)
-    chain = [_c(101, 1.05, 1.40, oi=20), _c(102, 0.62, 0.66, oi=20), _c(103, 0.30, 0.60, oi=20), _c(104, 0.1, 0.2, oi=20)]
+    chain = [_c(k, v, v + 0.3, oi=20) for k, v in {103: 1.28, 104: 0.97, 105: 0.72, 106: 0.52, 107: 0.37, 108: 0.26, 109: 0.18}.items()]
     cand = contracts.select(FakeBroker(chain), "SPY", "bull", spot, today)
     assert cand is not None and not cand.ok
     assert any("§9" in g["text"] for g in cand.gates if not g["ok"])

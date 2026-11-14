@@ -8,7 +8,7 @@ review you read before changing anything. Successor to AlpacaTrader
 ```
 Rules (spyqqq/config.py)        Daily budget $600 · $300/trade · 2 trades · 2 open
                                 ±20% on net debit · 90-min stall · flatten 15:45 ET
-                                entries 10:00–11:30 ET · 7–21 DTE · 2-wide spreads
+                                entries 10:00–11:30 ET · 7–21 DTE · 5-wide, long 2–3 strikes OTM
 Gates (each logs its KB §)      §3 window · §12 historical confidence · §22 vol edge
                                 §9 liquidity · §5 spread pricing · §4 day risk · debate
 Model                           claude-opus-5-5 (debate + EOD review)

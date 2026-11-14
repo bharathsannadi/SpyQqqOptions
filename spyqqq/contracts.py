@@ -1,7 +1,7 @@
 """contracts.py — pick the two legs of a vertical debit spread.
 
-Long leg: the first strike at/just beyond spot in the trade direction.
-Short leg: SPREAD_WIDTH_STEPS further out. Expiry: nearest inside DTE_MIN–DTE_MAX.
+Long leg: LONG_OFFSETS strikes beyond spot in the trade direction (2–3 OTM, ~0.40 delta).
+Short leg: SPREAD_WIDTH_STEPS further out (5-wide). Expiry: nearest inside DTE_MIN–DTE_MAX.
 Every KB gate the legs must pass is returned in `gates` so the ledger shows
 exactly why a candidate was taken or refused.
 """
@@ -66,13 +66,13 @@ def select(broker: Broker, sym: str, direction: str, spot: float,
         if len(strikes) < 4:
             continue
         step = min(round(strikes[i + 1] - strikes[i], 2) for i in range(len(strikes) - 1)) or 1.0
-        # candidate long strikes: ATM-ish then one step OTM
+        # candidate long strikes: a few steps OTM (see config.LONG_OFFSETS / KB §5 measurement)
         if direction == "bull":
             base = math.ceil(spot / step) * step
-            long_strikes = [base, base + step]
+            long_strikes = [base + step * k for k in config.LONG_OFFSETS]
         else:
             base = math.floor(spot / step) * step
-            long_strikes = [base, base - step]
+            long_strikes = [base - step * k for k in config.LONG_OFFSETS]
         by_strike = {c.strike: c for c in legs}
         for ls in long_strikes:
             ss = ls + step * config.SPREAD_WIDTH_STEPS if direction == "bull" else ls - step * config.SPREAD_WIDTH_STEPS

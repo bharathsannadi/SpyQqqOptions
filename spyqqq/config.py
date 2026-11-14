@@ -44,7 +44,11 @@ HEARTBEAT_STALE_SEC   = 120            # watchdog kills the daemon past this
 
 # ── Contract selection ───────────────────────────────────────────────────────
 DTE_MIN, DTE_MAX      = 7, 21
-SPREAD_WIDTH_STEPS    = 2              # short leg this many $1 strikes beyond the long (2-wide spread)
+# Measured on the cached 2022–26 SPY/QQQ option bars (7–21 DTE): an ATM 2-wide debit
+# spread costs a median 52–54% of width — outside KB §5 (25–45%) 90% of the time.
+# Long 2–3 strikes OTM on a 5-wide lands inside the band 60–73% of the time.
+SPREAD_WIDTH_STEPS    = 5              # short leg this many $1 strikes beyond the long
+LONG_OFFSETS          = (2, 3, 1)      # long-leg strikes beyond ceil/floor(spot), tried in order
 OPT_MIN_OI            = 200            # KB §9
 OPT_MAX_BID_ASK_PCT   = 0.25           # per-leg quote sanity (a cheap OTM short leg is wide in % terms)
 OPT_MAX_SPREAD_COST_PCT = 0.10         # KB §9 applied to the SPREAD: both legs' quote widths ≤ 10% of debit (≈5% one-way)

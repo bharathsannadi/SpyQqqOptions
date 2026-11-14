@@ -21,7 +21,7 @@ from .signal import Bar
 log = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 
-HISTORY_DAYS = 130
+HISTORY_DAYS = 1500        # all of it: Polygon seed (2021-06) + Alpaca tail
 
 
 def _to_et(ts: datetime) -> datetime:
@@ -43,14 +43,39 @@ class MarketData:
 
     # ── daily ────────────────────────────────────────────────────────────────
     def daily(self, sym: str) -> list[dict]:
+        """Daily bars: the on-disk cache (seeded from Polygon back to 2021 by
+        scripts/import_polygon.py) merged with Alpaca's recent bars, persisted."""
         today = datetime.now(ET).date()
         cached = self._daily.get(sym)
         if cached and cached[0] == today:
             return cached[1]
-        rows = self.b.daily_bars(sym, 260)
+        path = config.BARS_CACHE_DIR / f"{sym}_1d.jsonl"
+        by_date: dict[str, dict] = {}
+        if path.exists():
+            for line in path.read_text().splitlines():
+                try:
+                    d = json.loads(line); by_date[d["ts"][:10]] = d
+                except Exception:
+                    continue
+        fresh = self.b.daily_bars(sym, 260)
+        added = 0
+        for r in fresh:
+            k = _to_et(r["ts"]).strftime("%Y-%m-%d")
+            if k not in by_date:
+                by_date[k] = {"ts": k, "open": r["open"], "high": r["high"], "low": r["low"],
+                              "close": r["close"], "volume": r["volume"]}
+                added += 1
+        if added and by_date:
+            tmp = path.with_suffix(".tmp")
+            with tmp.open("w") as f:
+                for k in sorted(by_date):
+                    f.write(json.dumps(by_date[k]) + "\n")
+            tmp.replace(path)
+        rows = []
+        for k in sorted(by_date):
+            d = dict(by_date[k]); d["ts"] = ET.localize(datetime.strptime(k, "%Y-%m-%d"))
+            rows.append(d)
         if rows:
-            for r in rows:
-                r["ts"] = _to_et(r["ts"])
             self._daily[sym] = (today, rows)
         return rows
 
@@ -92,10 +117,14 @@ class MarketData:
         path = config.BARS_CACHE_DIR / f"{sym}_5m.jsonl"
         by_day: dict[date, list[Bar]] = defaultdict(list)
         last_ts: Optional[datetime] = None
+        seen: set[str] = set()
         if path.exists():
             for line in path.read_text().splitlines():
                 try:
                     d = json.loads(line)
+                    if d["ts"] in seen:
+                        continue
+                    seen.add(d["ts"])
                     d["ts"] = datetime.fromisoformat(d["ts"])
                     b = _bar(d)
                     by_day[b.ts.date()].append(b)
