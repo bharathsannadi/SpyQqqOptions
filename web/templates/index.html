@@ -87,19 +87,22 @@ function symCard(sym, s, hist) {
   let h = `<div class="row"><span class="dim">Price</span><span>${s.price ?? '—'}</span></div>`;
   h += `<div class="row"><span class="dim">Daily trend (20d SMA)</span><span class="${s.trend==='bull'?'ok':s.trend==='bear'?'bad':'dim'}">${s.trend ?? 'flat / no trade'}</span></div>`;
   h += `<div class="row"><span class="dim">EMA9 / RSI14</span><span>${ind.ema9 ?? '—'} / ${ind.rsi14 ?? '—'}</span></div>`;
+  if (s.gap_pct != null) h += `<div class="row"><span class="dim">Opening gap</span><span class="${Math.abs(s.gap_pct)>=1?'warn':''}">${s.gap_pct>0?'+':''}${s.gap_pct}%</span></div>`;
   if (sg) {
-    h += `<div class="sig ${sg.direction==='bull'?'ok':'bad'}">${sg.direction==='bull'?'▲ BUY CALL SPREAD':'▼ BUY PUT SPREAD'} <span class="dim" style="font-size:13px">strength ${sg.strength}</span></div>`;
+    h += `<div class="sig ${sg.direction==='bull'?'ok':'bad'}">${sg.direction==='bull'?'▲ BUY CALL SPREAD':'▼ BUY PUT SPREAD'} <span class="dim" style="font-size:13px">${sg.setup} · strength ${sg.strength}${sg.also&&sg.also.length?' · also '+sg.also.join(', '):''}</span></div>`;
   } else {
     h += `<div class="sig dim">no signal</div>`;
   }
-  // confidence from history
-  const dir = sg ? sg.direction : s.trend;
-  const hr = hist && dir ? hist[dir] : null;
-  if (hr) {
-    const lo = hr.lower95 ?? 0;
-    h += `<div class="row"><span class="dim">Historical confidence (${dir})</span><span class="${lo>=0.55?'ok':'warn'}">${hr.lower95!=null?(hr.lower95*100).toFixed(0)+'%':'—'}</span></div>`;
-    h += `<div class="dim" style="font-size:12px">${hr.label} · avg move ${hr.avg_move_pct ?? '—'}%</div>`;
-    h += `<div class="bar"><i style="width:${(hr.rate||0)*100}%"></i></div>`;
+  // historical confidence per setup — the measured hit rate, not a score
+  if (hist) {
+    for (const [setup, byDir] of Object.entries(hist)) {
+      for (const dir of ['bull','bear']) {
+        const hr = byDir[dir]; if (!hr) continue;
+        const active = sg && sg.setup===setup && sg.direction===dir;
+        const lo = hr.lower95 ?? 0;
+        h += `<div class="row" style="${active?'font-weight:600':''}"><span class="dim">${setup} ${dir==='bull'?'▲':'▼'}</span><span class="${lo>=0.55?'ok':lo>=0.35?'':'bad'}">${hr.lower95!=null?(hr.lower95*100).toFixed(0)+'%':'—'} <span class="dim" style="font-size:11px">(${hr.rate!=null?(hr.rate*100).toFixed(0)+'% hit, n='+hr.n:'n='+hr.n})</span></span></div>`;
+      }
+    }
   }
   if (s.candidate) {
     const c = s.candidate;

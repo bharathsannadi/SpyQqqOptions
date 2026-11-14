@@ -29,6 +29,7 @@ class OpenSpread:
     exit: ExitState
     peak_pct: float = 0.0
     last_mid: float = field(default=0.0)
+    last_quote_at: Optional[datetime] = None
 
     def pnl_pct(self, mid: float) -> float:
         return (mid - self.net_debit) / self.net_debit if self.net_debit else 0.0

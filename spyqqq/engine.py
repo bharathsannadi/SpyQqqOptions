@@ -19,7 +19,7 @@ from . import config, contracts, debate, exits, gates, history, report, signal a
 from .broker import Broker
 from .data import MarketData
 from .ledger import Ledger
-from .risk import DayState
+from .risk import DayState, recent_slippage_bps, recent_stops
 from .status import write_status
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,8 @@ class Engine:
         self.day = DayState.load()
         self.open: dict[str, exits.OpenSpread] = {}
         self.exit_engine = exits.new_engine()
-        self.hit_rates: dict[str, dict[str, history.HitRate]] = {}
+        self.hit_rates: dict[str, dict[str, dict[str, history.HitRate]]] = {}   # sym → setup → dir
+        self._last_reconcile = 0.0
         self.last_signal: dict[str, dict] = {}
         self._last_scan = self._last_monitor = 0.0
         self._last_reject: dict[tuple, float] = {}
@@ -98,6 +99,10 @@ class Engine:
             self._last_monitor = t
             self.monitor(now)
 
+        if market_open and t - self._last_reconcile >= config.RECONCILE_EVERY_SEC:
+            self._last_reconcile = t
+            self.reconcile_light()
+
         if market_open and exits.is_flatten_time(now):
             self.flatten_all("EOD flatten")
             if self._reported_for != self.day.date and now.time() >= config.FLATTEN_AT_ET:
@@ -133,42 +138,63 @@ class Engine:
             try:
                 intraday = self.md.history(sym)
                 daily = self.md.daily_by_date(sym, sorted(intraday))
-                self.hit_rates[sym] = history.replay(sym, daily, intraday)
-                for d, hr in self.hit_rates[sym].items():
-                    log.info(f"[history] {sym} {d}: {hr.label()}")
+                self.hit_rates[sym] = history.replay_all(sym, daily, intraday)
+                for st, by_dir in self.hit_rates[sym].items():
+                    for d, hr in by_dir.items():
+                        log.info(f"[history] {sym} {st} {d}: {hr.label()}")
             except Exception as e:
                 log.warning(f"[history] {sym}: {e}")
 
     # ── scan ─────────────────────────────────────────────────────────────────
     def scan(self, sym: str, now: datetime) -> None:
-        trend = sig.daily_trend(self.md.daily_closes(sym))
+        daily_closes = self.md.daily_closes(sym)
+        trend = sig.daily_trend(daily_closes)
         bars = self.md.today_bars(sym)
-        s = sig.evaluate(sym, trend, bars)
+        warmup = self.md.prev_session_bars(sym)
+        gap = None
+        if bars and len(daily_closes) >= 2:
+            prev_close = daily_closes[-2] if daily_closes[-1] == bars[-1].close else daily_closes[-1]
+            gap = (bars[0].open - prev_close) / prev_close * 100.0
         snap = {"ts": now.isoformat(timespec="seconds"), "trend": trend, "bars": len(bars),
-                "price": bars[-1].close if bars else None, "signal": None, "gates": [],
-                "confidence": None, "candidate": None, "debate": None, "accepted": False}
+                "price": bars[-1].close if bars else None, "gap_pct": None if gap is None else round(gap, 2),
+                "signal": None, "gates": [], "confidence": None, "candidate": None, "debate": None,
+                "accepted": False}
         if bars:
-            # always expose the indicator state, signal or not
             closes = [b.close for b in bars]
             e = sig.ema_series(closes, config.PULLBACK_EMA)[-1]
+            vw = sig.vwap_series(bars)[-1]
             snap["indicators"] = {"ema9": round(e, 2) if e else None,
-                                  "rsi14": round(sig.rsi(closes, config.RSI_LEN) or 0, 1)}
+                                  "rsi14": round(sig.rsi(closes, config.RSI_LEN) or 0, 1),
+                                  "vwap": round(vw, 2)}
         hr_all = self.hit_rates.get(sym, {})
-        snap["history"] = {d: h.as_dict() for d, h in hr_all.items()}
-        if s is None:
+        snap["history"] = {st: {d: h.as_dict() for d, h in by_dir.items()} for st, by_dir in hr_all.items()}
+        signals = sig.evaluate_all(sym, trend, bars, warmup)
+        if not signals:
             self.last_signal[sym] = snap
             return
+        # several setups may fire: take the one with the best historical lower bound
+        def _conf(x):
+            h = hr_all.get(x.setup, {}).get(x.direction)
+            return (h.lower95 or 0.0) if h else 0.0
+        s = max(signals, key=_conf)
         snap["signal"] = {"direction": s.direction, "setup": s.setup, "strength": s.strength,
-                          "price": s.price, "indicators": s.indicators}
-        g: list[dict] = [{"gate": "entry_window", **dict(zip(("ok", "text"), gates.entry_window(now)))}]
-        hr = hr_all.get(s.direction)
+                          "price": s.price, "indicators": s.indicators,
+                          "also": [f"{x.setup}:{x.direction}" for x in signals if x is not s]}
+        G = lambda name, res: {"gate": name, "ok": res[0], "text": res[1]}
+        g: list[dict] = [G("entry_window", gates.entry_window(now, gap)),
+                         G("event_blackout", gates.event_blackout(now.date()))]
+        hr = hr_all.get(s.setup, {}).get(s.direction)
         snap["confidence"] = hr.as_dict() if hr else None
-        g.append({"gate": "confidence", **dict(zip(("ok", "text"), gates.confidence_gate(hr)))})
+        g.append(G("confidence", gates.confidence_gate(hr)))
+        g.append(G("cooldown", gates.cooldown_ok(
+            recent_stops(self.ledger, sym, s.direction, config.COOLDOWN_SESSIONS), sym, s.direction)))
+        g.append(G("same_direction", gates.same_direction_ok(self.day.open_directions(), s.direction)))
+        g.append(G("fill_quality", gates.slippage_ok(recent_slippage_bps(self.ledger, config.SLIPPAGE_WINDOW))))
         s.hv5, s.hv30 = self.md.hv(sym)
         s.iv30 = self.md.iv30(sym, s.price)
         self.md.record_iv(sym, s.iv30)
         s.ivr = self.md.iv_rank(sym, s.iv30)
-        g.append({"gate": "vol_edge", **dict(zip(("ok", "text"), gates.vol_edge_gate(s.hv5, s.hv30, s.iv30)))})
+        g.append(G("vol_edge", gates.vol_edge_gate(s.hv5, s.hv30, s.iv30)))
         cand = None
         if all(x["ok"] for x in g):
             cand = contracts.select(self.broker, sym, s.direction, s.price, now.date())
@@ -185,9 +211,10 @@ class Engine:
             g.append({"gate": "day_risk", "ok": ok, "text": text})
         if cand and all(x["ok"] for x in g):
             res = debate.run(s, {"candidate": f"{cand.long.occ}/{cand.short.occ} debit {cand.net_debit:.2f}",
-                                 "qty": qty, "max_loss_usd": round(cand.net_debit * 100 * qty, 2)})
+                                 "qty": qty, "max_loss_usd": round(cand.net_debit * 100 * qty, 2),
+                                 "historical_confidence": hr.label() if hr else "none"})
             snap["debate"] = {k: res[k] for k in ("proceed", "confidence", "reason", "status")}
-            g.append({"gate": "debate", **dict(zip(("ok", "text"), gates.debate_gate(res)))})
+            g.append(G("debate", gates.debate_gate(res)))
         snap["gates"] = g
         accepted = bool(cand) and all(x["ok"] for x in g)
         snap["accepted"] = accepted
@@ -243,14 +270,22 @@ class Engine:
         st = self.exit_engine.init_position(entry=price)
         self.open[pos_id] = exits.OpenSpread(pos_id, s.sym, s.direction, s.setup, cand.long.occ,
                                              cand.short.occ, qty, price, now, st)
-        self.day.register_entry(s.sym, pos_id, price * 100 * qty)
+        self.day.register_entry(s.sym, pos_id, price * 100 * qty, s.direction)
         log.info(f"[engine] OPEN {s.sym} {s.direction} {cand.long.occ}/{cand.short.occ} x{qty} @ {price:.2f}")
 
     def monitor(self, now: datetime) -> None:
         for pos_id, pos in list(self.open.items()):
             mid = self.broker.spread_mid(pos.long_occ, pos.short_occ)
             if mid is None:
+                last_q = pos.last_quote_at or pos.opened_at
+                stale = (now - last_q).total_seconds()
+                if stale >= config.STALE_QUOTE_CLOSE_SEC:
+                    fallback = (pos.last_mid or pos.net_debit) * 0.95
+                    self.ledger.engine("stale_quote", pos_id=pos_id, sym=pos.sym, stale_sec=int(stale))
+                    self.close(pos, fallback, f"no spread quote for {stale/60:.0f} min — an unmanaged "
+                                              f"position is not acceptable (2026-09 SMCI lesson)")
                 continue
+            pos.last_quote_at = now
             action, why = exits.check(pos, mid, now, self.exit_engine)
             if action == "close":
                 self.close(pos, mid, why)
@@ -273,10 +308,12 @@ class Engine:
                 self.ledger.engine("close_unfilled", pos_id=pos.pos_id, sym=pos.sym, reason=why)
                 return
             price = fill["price"] or net_limit
-        pnl = (price - pos.net_debit) * 100 * pos.qty
+        fees = config.FEE_PER_SPREAD_RT * pos.qty
+        pnl = (price - pos.net_debit) * 100 * pos.qty - fees
         self.ledger.close(pos.sym, pos.setup, pos_id=pos.pos_id, direction=pos.direction, qty=pos.qty,
                           long_occ=pos.long_occ, short_occ=pos.short_occ, entry=pos.net_debit,
-                          exit=price, pnl_usd=round(pnl, 2), pnl_pct=round(pos.pnl_pct(price) * 100, 2),
+                          exit=price, pnl_usd=round(pnl, 2), fees_usd=round(fees, 2),
+                          pnl_pct=round(pos.pnl_pct(price) * 100, 2),
                           peak_pct=round(pos.peak_pct * 100, 2), reason=why,
                           held_min=round((self.now() - pos.opened_at).total_seconds() / 60, 1))
         self.day.register_close(pos.sym, pnl)
@@ -319,6 +356,31 @@ class Engine:
                                    "occ": occ, "qty": p["qty"], "closed": ok})
         self.day.save()
         log.info(f"[engine] reconciled: {len(self.open)} open spread(s), {len(broker_pos)} option legs at broker")
+
+    def reconcile_light(self) -> None:
+        """Mid-session truth check against the broker (the old app was 'confidently
+        wrong every time' it trusted its own store — 2026-09-11)."""
+        broker_pos = {p["symbol"]: p for p in self.broker.positions() if p["asset_class"] == "us_option"}
+        if not broker_pos and self.open and not self.broker.alive():
+            return                                   # a read failure is not "flat"
+        for pos_id, pos in list(self.open.items()):
+            if pos.long_occ not in broker_pos:
+                log.warning(f"[engine] {pos.sym} spread {pos_id} vanished at broker — marking closed")
+                price = pos.last_mid or pos.net_debit
+                self.ledger.close(pos.sym, pos.setup, pos_id=pos_id, direction=pos.direction, qty=pos.qty,
+                                  long_occ=pos.long_occ, short_occ=pos.short_occ, entry=pos.net_debit,
+                                  exit=price, pnl_usd=round((price - pos.net_debit) * 100 * pos.qty, 2),
+                                  pnl_pct=round(pos.pnl_pct(price) * 100, 2), peak_pct=round(pos.peak_pct * 100, 2),
+                                  reason="vanished at broker (reconcile)", held_min=0)
+                self.day.register_close(pos.sym, (price - pos.net_debit) * 100 * pos.qty)
+                self.open.pop(pos_id, None)
+        known = {p.long_occ for p in self.open.values()} | {p.short_occ for p in self.open.values()}
+        for occ, p in broker_pos.items():
+            if occ not in known:
+                log.warning(f"[engine] ORPHAN leg {occ} qty {p['qty']} mid-session — flattening")
+                ok = self.broker.close_position_market(occ)
+                self.ledger.write({"kind": "orphan", "sym": occ[:3].rstrip("0123456789"), "setup": "orphan",
+                                   "occ": occ, "qty": p["qty"], "closed": ok, "when": "mid-session"})
 
     # ── report ───────────────────────────────────────────────────────────────
     def write_report(self) -> None:

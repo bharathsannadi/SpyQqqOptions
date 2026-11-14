@@ -5,16 +5,21 @@ ledger and the dashboard show, so a rejected day explains itself.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from . import config, vol_edge
 from .history import HitRate, confidence_ok
 
 
-def entry_window(now: datetime) -> tuple[bool, str]:
+def entry_window(now: datetime, open_gap_pct: Optional[float] = None) -> tuple[bool, str]:
     t = now.timetz().replace(tzinfo=None)
     lo, hi = config.ENTRY_WINDOW_START_ET, config.ENTRY_WINDOW_END_ET
+    if open_gap_pct is not None and abs(open_gap_pct) >= config.GAP_DELAY_PCT:
+        lo = max(lo, config.GAP_DELAY_START_ET)
+        if t < lo:
+            return False, (f"KB §3 Entry Timing: {open_gap_pct:+.1f}% opening gap — first 60 min is the "
+                           f"highest-whipsaw window, entries from {lo:%H:%M} ET today")
     if lo <= t <= hi:
         return True, f"KB §3 Entry Timing: {t:%H:%M} ET inside {lo:%H:%M}–{hi:%H:%M} window"
     return False, (f"KB §3 Entry Timing: {t:%H:%M} ET outside {lo:%H:%M}–{hi:%H:%M} — "
@@ -86,6 +91,46 @@ def debate_gate(result: dict) -> tuple[bool, str]:
     tag = "PROCEED" if result["proceed"] else "SUPPRESS"
     return result["proceed"], (f"Debate gate ({config.DEBATE_MODEL}): {tag} conf {result['confidence']:.0%} — "
                                f"{result['reason']}")
+
+
+def event_blackout(d: date) -> tuple[bool, str]:
+    """No new entries on FOMC decision days / NFP mornings (operator list + first-Friday rule)."""
+    ds = d.isoformat()
+    if ds in config.EVENT_BLACKOUT_DATES:
+        return False, f"KB §17 Event Risk: {ds} is a scheduled macro-event day (FOMC/CPI) — no new entries (Cofnas)"
+    if config.NFP_BLACKOUT and d.weekday() == 4 and d.day <= 7:
+        return False, f"KB §17 Event Risk: {ds} is the first Friday (NFP 08:30 ET) — no new entries (Cofnas)"
+    return True, f"KB §17 Event Risk: {ds} has no scheduled macro release"
+
+
+def slippage_ok(recent_slip_bps: list[float]) -> tuple[bool, str]:
+    """Fill-quality circuit breaker. 2026-06-04: the day's killer was 225 bps average
+    slippage on relaxed fills, not the stops — and the coach blamed the stops."""
+    n = len(recent_slip_bps)
+    if n < config.SLIPPAGE_WINDOW:
+        return True, f"KB §9 Fill Quality: {n}/{config.SLIPPAGE_WINDOW} recent fills measured, no verdict yet"
+    avg = sum(recent_slip_bps[-config.SLIPPAGE_WINDOW:]) / config.SLIPPAGE_WINDOW
+    if avg >= config.SLIPPAGE_HALT_BPS:
+        return False, (f"KB §9 Fill Quality: avg slippage {avg:.0f} bps over last {config.SLIPPAGE_WINDOW} fills "
+                       f"≥ {config.SLIPPAGE_HALT_BPS:.0f} — the edge is not surviving fills, halt entries")
+    return True, f"KB §9 Fill Quality: avg slippage {avg:.0f} bps over last {config.SLIPPAGE_WINDOW} fills"
+
+
+def cooldown_ok(recent_stops: int, sym: str, direction: str) -> tuple[bool, str]:
+    """Repeat-loser cooldown. Old ledger: ORCL 7 trades/1 win −$1,355, NVDA 10/1 −$543."""
+    if recent_stops >= config.COOLDOWN_STOPS:
+        return False, (f"KB §7 Repeat Loser: {sym} {direction} stopped {recent_stops}× in the last "
+                       f"{config.COOLDOWN_SESSIONS} sessions — cooling down")
+    return True, f"KB §7 Repeat Loser: {sym} {direction} {recent_stops} recent stop(s) < {config.COOLDOWN_STOPS}"
+
+
+def same_direction_ok(open_directions: list[str], direction: str) -> tuple[bool, str]:
+    """SPY and QQQ are ~0.9 correlated: two same-way spreads are one doubled bet (KB §5, 2026-06-05)."""
+    n = sum(1 for d in open_directions if d == direction)
+    if n >= config.MAX_SAME_DIRECTION_OPEN:
+        return False, (f"KB §5 Correlation: already {n} open {direction} spread(s) — SPY/QQQ move together, "
+                       f"max {config.MAX_SAME_DIRECTION_OPEN} same-direction")
+    return True, f"KB §5 Correlation: {n} open {direction} spread(s) < {config.MAX_SAME_DIRECTION_OPEN}"
 
 
 def summarize(gates: list[dict]) -> tuple[bool, list[str]]:

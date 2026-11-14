@@ -24,7 +24,11 @@ _REVIEW_SYSTEM = (
     "(1) what happened and whether the rules were followed; (2) the single most useful change for "
     "tomorrow, naming the exact config constant and the new value, or 'no change' with the reason; "
     "(3) one sentence on what the rolling stats say about the edge — treat paper results as weak evidence. "
-    "Never suggest raising DAILY_BUDGET_USD, PER_TRADE_MAX_USD or MAX_TRADES_PER_DAY.")
+    "Hard rules learned from the previous system: never suggest raising DAILY_BUDGET_USD, PER_TRADE_MAX_USD "
+    "or MAX_TRADES_PER_DAY; never recommend 'taking more of the signals' or loosening a gate; before blaming "
+    "entries or stops, check the fill-quality (slippage) line and the gate-rejection list — on 2026-06-04 the "
+    "losses were slippage on illiquid fills and the coach wrongly said 'tighten stops'. A perfect win rate on "
+    "paper is a fill-assumption artefact, not skill. If fewer than 20 closes exist, say the sample is too small.")
 
 
 def _money(v: float) -> str:
@@ -35,7 +39,11 @@ def summarize(day: str, ledger: Ledger) -> dict:
     rows = list(ledger.rows(day))
     dec = [r for r in rows if r["kind"] == "decision"]
     fills = [r for r in rows if r["kind"] == "fill"]
-    closes = [r for r in rows if r["kind"] == "close" and r.get("exit") is not None]
+    closes_by_id: dict = {}
+    for r in rows:
+        if r["kind"] == "close" and r.get("exit") is not None:
+            closes_by_id[r.get("pos_id") or r["ts"]] = r      # one close per position (old journal had 3× dupes)
+    closes = list(closes_by_id.values())
     eng = [r for r in rows if r["kind"] == "engine"]
     rej_by_sec: Counter = Counter()
     rej_text: Counter = Counter()
@@ -65,9 +73,13 @@ def summarize(day: str, ledger: Ledger) -> dict:
 
 def rolling(ledger: Ledger, days: int = 20) -> dict:
     since = (datetime.now() - timedelta(days=days * 1.5)).strftime("%Y-%m-%d")
-    closes = [r for r in ledger.rows() if r["kind"] == "close" and r["ts"][:10] >= since
-              and r.get("exit") is not None]
+    by_id: dict = {}
+    for r in ledger.rows():
+        if r["kind"] == "close" and r["ts"][:10] >= since and r.get("exit") is not None:
+            by_id[r.get("pos_id") or r["ts"]] = r
+    closes = list(by_id.values())
     pnl = [r.get("pnl_usd", 0) or 0 for r in closes]
+    top3 = sum(sorted(pnl, reverse=True)[:3])
     wins = [p for p in pnl if p > 0]; losses = [p for p in pnl if p <= 0]
     by_day: dict[str, float] = defaultdict(float)
     for r in closes:
@@ -76,7 +88,9 @@ def rolling(ledger: Ledger, days: int = 20) -> dict:
             "pf": (sum(wins) / abs(sum(losses))) if losses and sum(losses) else None,
             "avg_win": (sum(wins) / len(wins)) if wins else None,
             "avg_loss": (sum(losses) / len(losses)) if losses else None,
-            "days": len(by_day), "green_days": sum(1 for v in by_day.values() if v > 0)}
+            "days": len(by_day), "green_days": sum(1 for v in by_day.values() if v > 0),
+            "top3_share": (top3 / sum(pnl)) if sum(pnl) > 0 else None,
+            "fees": sum(r.get("fees_usd", 0) or 0 for r in closes)}
 
 
 def render(day: str, ledger: Ledger, account: Optional[dict] = None,
@@ -132,17 +146,21 @@ def render(day: str, ledger: Ledger, account: Optional[dict] = None,
     L.append("## Historical confidence (what the signal rule did on past sessions)")
     if hit_rates:
         for sym, hrs in hit_rates.items():
-            for d, h in hrs.items():
-                lab = h.label() if hasattr(h, "label") else h.get("label")
-                L.append(f"- {sym} {d}: {lab}")
+            for st, by_dir in hrs.items():
+                for d, h in by_dir.items():
+                    lab = h.label() if hasattr(h, "label") else h.get("label")
+                    L.append(f"- {sym} {st} {d}: {lab}")
     else:
         L.append("- not computed")
     L.append("")
     L.append("## Rolling 20 sessions")
     if r["n"]:
-        L.append(f"- {r['n']} closes over {r['days']} days ({r['green_days']} green) · net {_money(r['net'])} · "
-                 f"win rate {r['win_rate']:.0%} · PF {(r['pf'] or 0):.2f} · "
+        L.append(f"- {r['n']} closes over {r['days']} days ({r['green_days']} green) · net {_money(r['net'])} "
+                 f"(fees {_money(r['fees'])}) · win rate {r['win_rate']:.0%} · PF {(r['pf'] or 0):.2f} · "
                  f"avg win {_money(r['avg_win'] or 0)} / avg loss {_money(r['avg_loss'] or 0)}")
+        if r["top3_share"] is not None:
+            flag = " ⚠ outlier-carried (GO-LIVE: top-3 must be < 40%)" if r["top3_share"] > 0.40 else ""
+            L.append(f"- top-3 trades = {r['top3_share']:.0%} of net{flag}")
     else:
         L.append("- no closed trades yet")
     L.append("")

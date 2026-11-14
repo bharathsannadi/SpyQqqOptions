@@ -41,7 +41,8 @@ def write_status(engine, clk) -> None:
                    "min_confidence": config.MIN_CONFIDENCE, "debate_model": config.DEBATE_MODEL},
         "open": open_rows,
         "signals": engine.last_signal,
-        "history": {sym: {d: h.as_dict() for d, h in hrs.items()} for sym, hrs in engine.hit_rates.items()},
+        "history": {sym: {st: {d: h.as_dict() for d, h in by_dir.items()} for st, by_dir in hrs.items()}
+                    for sym, hrs in engine.hit_rates.items()},
     }
     tmp = config.STATUS_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(doc, indent=1, default=str))

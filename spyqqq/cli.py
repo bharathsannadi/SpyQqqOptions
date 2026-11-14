@@ -104,8 +104,9 @@ def cmd_report(a):
 def cmd_history(a):
     s = _status()
     for sym, hrs in (s.get("history") or {}).items():
-        for d, h in hrs.items():
-            print(f"{sym} {d:4s}: {h['label']}")
+        for st, by_dir in hrs.items():
+            for d, h in by_dir.items():
+                print(f"{sym} {st:15s} {d:4s}: {h['label']}")
     if not s.get("history"):
         print("no history yet — the engine computes it at boot")
 

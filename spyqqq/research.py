@@ -43,13 +43,13 @@ def load(sym: str):
     return daily_by_date, intraday
 
 
-def run_cell(sym, daily, intraday, rsi, vol, tgt, stp, years=None):
+def run_cell(sym, daily, intraday, rsi, vol, tgt, stp, years=None, setup="trend_pullback"):
     config.RSI_MIN, config.RSI_MAX = rsi
     config.VOL_RATIO_MIN = vol
     history.HIST_TARGET_PCT, history.HIST_STOP_PCT = tgt, stp
     if years:
         intraday = {d: v for d, v in intraday.items() if d.year in years}
-    return history.replay(sym, daily, intraday)
+    return history.replay(sym, daily, intraday, setup)
 
 
 def main() -> None:
@@ -57,9 +57,26 @@ def main() -> None:
     grid_vol = [0.8, 1.0, 1.2]
     grid_out = [(0.0030, 0.0030), (0.0040, 0.0030), (0.0050, 0.0050)]
     lines = [f"# Entry-rule sweep — {datetime.now():%Y-%m-%d %H:%M}", ""]
+    quick = "--quick" in sys.argv          # vwap_momentum + by-year only
     for sym in config.UNDERLYINGS:
         daily, intraday = load(sym)
         yrs = sorted({d.year for d in intraday})
+        lines += [f"## {sym} — vwap_momentum (ported from AlpacaTrader) — {len(intraday)} sessions", "",
+                  "| tgt/stp | dir | n | hit | lower95 | avg move % |", "|---|---|---|---|---|---|"]
+        for (tgt, stp) in grid_out:
+            hr = run_cell(sym, daily, intraday, (40, 65), 0.8, tgt, stp, setup="vwap_momentum")
+            for d in ("bull", "bear"):
+                h = hr[d]
+                lines.append(f"| {tgt*100:.2f}/{stp*100:.2f} | {d} | {h.n} | {(h.rate or 0):.0%} | "
+                             f"{(h.lower95 or 0):.0%} | {(h.avg_move_pct or 0):+.3f} |")
+            print(f"{sym} vwap_momentum out={tgt}/{stp}: bull n={hr['bull'].n} {hr['bull'].rate} bear n={hr['bear'].n} {hr['bear'].rate}", flush=True)
+        lines += ["", f"### {sym} vwap_momentum by year (0.30/0.30)", "", "| year | bull n | bull hit | bear n | bear hit |", "|---|---|---|---|---|"]
+        for y in yrs:
+            hr = run_cell(sym, daily, intraday, (40, 65), 0.8, 0.0030, 0.0030, years={y}, setup="vwap_momentum")
+            lines.append(f"| {y} | {hr['bull'].n} | {(hr['bull'].rate or 0):.0%} | {hr['bear'].n} | {(hr['bear'].rate or 0):.0%} |")
+        lines.append("")
+        if quick:
+            continue
         lines += [f"## {sym} — {len(intraday)} sessions {min(intraday)} → {max(intraday)}", "",
                   "| RSI | vol≥ | tgt/stp | dir | n | hit | lower95 | avg move % |", "|---|---|---|---|---|---|---|---|"]
         for rsi, vol, (tgt, stp) in itertools.product(grid_rsi, grid_vol, grid_out):

@@ -89,14 +89,16 @@ def outcome(direction: str, entry: float, later: Sequence[sig.Bar]) -> tuple[boo
 
 
 def replay(sym: str, daily_closes_by_date: dict[date, Sequence[float]],
-           intraday: dict[date, Sequence[sig.Bar]]) -> dict[str, HitRate]:
+           intraday: dict[date, Sequence[sig.Bar]], setup: str = "trend_pullback") -> dict[str, HitRate]:
     """`daily_closes_by_date[d]` = closes up to and including d-1 (what was known
     at the open of d). `intraday[d]` = that day's 5-min bars in order."""
     stats: dict[str, list[tuple[bool, float]]] = defaultdict(list)
-    for d in sorted(intraday):
+    days = sorted(intraday)
+    for idx, d in enumerate(days):
         bars = list(intraday[d])
+        warmup = list(intraday[days[idx - 1]]) if idx > 0 else []
         trend = sig.daily_trend(daily_closes_by_date.get(d, []))
-        if trend is None:
+        if trend is None and sig.TREND_REQUIRED.get(setup, True):
             continue
         fired = False
         for i in range(2, len(bars)):
@@ -104,7 +106,7 @@ def replay(sym: str, daily_closes_by_date: dict[date, Sequence[float]],
                 break
             if not _in_window(bars[i].ts.time()):
                 continue
-            s = sig.evaluate(sym, trend, bars[:i + 1])
+            s = sig.evaluate(sym, trend, bars[:i + 1], setup, warmup)
             if s is None:
                 continue
             hit, mv = outcome(s.direction, s.price, bars[i + 1:])
@@ -119,6 +121,11 @@ def replay(sym: str, daily_closes_by_date: dict[date, Sequence[float]],
                                  (hits / n) if n else None, lo, hi,
                                  (sum(m for _, m in rows) / n * 100) if n else None)
     return out
+
+
+def replay_all(sym: str, daily_closes_by_date, intraday) -> dict[str, dict[str, HitRate]]:
+    from . import config as _c
+    return {st: replay(sym, daily_closes_by_date, intraday, st) for st in _c.SETUPS_ENABLED}
 
 
 def confidence_ok(hr: Optional[HitRate]) -> tuple[bool, str]:

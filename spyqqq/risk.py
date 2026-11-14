@@ -22,6 +22,26 @@ def today_str() -> str:
     return datetime.now(ET).strftime("%Y-%m-%d")
 
 
+def recent_slippage_bps(ledger, n: int) -> list[float]:
+    """Last n real fills' slippage in bps of the modelled mid (dry fills excluded)."""
+    out = []
+    for r in ledger.rows():
+        if r["kind"] == "fill" and not r.get("dry") and r.get("expected_mid") and r.get("slippage") is not None:
+            out.append(float(r["slippage"]) / float(r["expected_mid"]) * 10_000)
+    return out[-n:]
+
+
+def recent_stops(ledger, sym: str, direction: str, sessions: int) -> int:
+    """Stop-outs (closes with a loss, not EOD flattens) for sym+direction over the last `sessions` trading days."""
+    days = sorted({r["ts"][:10] for r in ledger.rows() if r["kind"] == "close"})[-sessions:]
+    if not days:
+        return 0
+    return sum(1 for r in ledger.rows()
+               if r["kind"] == "close" and r["ts"][:10] in days and r.get("sym") == sym
+               and r.get("direction") == direction and (r.get("pnl_usd") or 0) < 0
+               and "flatten" not in (r.get("reason") or ""))
+
+
 @dataclass
 class DayState:
     date: str = field(default_factory=today_str)
@@ -29,6 +49,7 @@ class DayState:
     debit_spent_usd: float = 0.0
     realized_usd: float = 0.0
     open_by_sym: dict = field(default_factory=dict)     # sym -> pos_id
+    open_dir_by_sym: dict = field(default_factory=dict) # sym -> bull|bear
     halted_reason: str = ""
 
     # ── persistence ──────────────────────────────────────────────────────────
@@ -73,16 +94,22 @@ class DayState:
         return True, (f"KB §4 Position Sizing: ${debit_usd:,.0f} ≤ ${config.PER_TRADE_MAX_USD:,.0f}/trade, "
                       f"${self.debit_spent_usd + debit_usd:,.0f} ≤ ${config.DAILY_BUDGET_USD:,.0f}/day")
 
-    def register_entry(self, sym: str, pos_id: str, debit_usd: float) -> None:
+    def register_entry(self, sym: str, pos_id: str, debit_usd: float, direction: str = "") -> None:
         self.trades += 1
         self.debit_spent_usd += debit_usd
         self.open_by_sym[sym] = pos_id
+        if direction:
+            self.open_dir_by_sym[sym] = direction
         self.save()
 
     def register_close(self, sym: str, pnl_usd: float) -> None:
         self.realized_usd += pnl_usd
         self.open_by_sym.pop(sym, None)
+        self.open_dir_by_sym.pop(sym, None)
         self.save()
+
+    def open_directions(self) -> list[str]:
+        return list(self.open_dir_by_sym.values())
 
     def contracts_for(self, net_debit: float) -> int:
         """How many spreads fit under the per-trade cap AND what's left of the day."""

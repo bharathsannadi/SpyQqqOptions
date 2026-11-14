@@ -88,3 +88,50 @@ def test_confidence_gate_requires_sample_and_floor(monkeypatch):
     assert not ok and "edge not demonstrated" in why
     good = history.HitRate("SPY", "bull", 100, 68, 0.68, 0.58, 0.77, 0.1)
     assert history.confidence_ok(good)[0]
+
+
+def _trend_bars(day: date, n=90, start_px=100.0, step=0.08, start="09:30"):
+    """A clean grinding uptrend with every bar closing up on steady volume."""
+    closes = [start_px + step * i for i in range(n)]
+    return _bars(day, closes, start=start, vol=1000.0)
+
+
+def test_vwap_momentum_needs_warmup_and_fires_in_trend():
+    d = date(2026, 11, 13)
+    warm = _trend_bars(date(2026, 11, 12), n=78, start_px=95.0)
+    today = _trend_bars(d, n=10, start_px=101.5)
+    today[-1].volume = 1500.0
+    assert sig.evaluate_vwap_momentum("SPY", today, warmup=[]) is None          # no MACD without warm-up
+    s = sig.evaluate_vwap_momentum("SPY", today, warmup=warm)
+    assert s is not None and s.direction == "bull" and s.setup == "vwap_momentum"
+    assert s.indicators["macd_hist"] > 0 and s.indicators["above_vwap_pct"] > 0.5
+
+
+def test_vwap_momentum_bear_mirror_and_no_fire_on_chop():
+    d = date(2026, 11, 13)
+    warm = _bars(date(2026, 11, 12), [110 - 0.08 * i for i in range(78)])
+    today = _bars(d, [103.5 - 0.1 * i for i in range(10)]); today[-1].volume = 1500.0
+    s = sig.evaluate_vwap_momentum("SPY", today, warmup=warm)
+    assert s is not None and s.direction == "bear"
+    chop = _bars(d, [100 + (0.3 if i % 2 else -0.3) for i in range(10)])
+    assert sig.evaluate_vwap_momentum("SPY", chop, warmup=warm) is None
+
+
+def test_evaluate_all_returns_each_enabled_setup(monkeypatch):
+    monkeypatch.setattr(config, "SETUPS_ENABLED", ("trend_pullback", "vwap_momentum"))
+    d = date(2026, 11, 13)
+    warm = _trend_bars(date(2026, 11, 12), n=78, start_px=95.0)
+    closes = [100 + 0.1 * i for i in range(20)] + [101.5, 101.0, 100.7, 101.6]
+    bars = _bars(d, closes)
+    out = sig.evaluate_all("SPY", "bull", bars, warmup=warm)
+    assert any(x.setup == "trend_pullback" for x in out)
+
+
+def test_replay_setup_param_uses_warmup():
+    d0, d1 = date(2026, 11, 12), date(2026, 11, 13)
+    intraday = {d0: _trend_bars(d0, n=78, start_px=95.0), d1: _trend_bars(d1, n=78, start_px=101.5)}
+    for b in intraday[d1]: b.volume = 1200.0
+    hr = history.replay("SPY", {d0: [], d1: []}, intraday, setup="vwap_momentum")
+    assert hr["bull"].n == 1            # trend-agnostic: fires even with no daily closes
+    hr2 = history.replay("SPY", {d0: [], d1: []}, intraday, setup="trend_pullback")
+    assert hr2["bull"].n == 0           # trend_pullback needs the daily trend

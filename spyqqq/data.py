@@ -110,6 +110,13 @@ class MarketData:
         cutoff = now - timedelta(minutes=5)
         return [x for x in bars if x.ts <= cutoff and x.ts.time() >= start.time()]
 
+    def prev_session_bars(self, sym: str) -> list[Bar]:
+        """The last completed session's 5-min bars (EMA/MACD warm-up for vwap_momentum)."""
+        hist = self.history(sym)
+        today = datetime.now(ET).date()
+        prior = [d for d in sorted(hist) if d < today]
+        return hist[prior[-1]] if prior else []
+
     def history(self, sym: str, days: int = HISTORY_DAYS) -> dict[date, list[Bar]]:
         """{session_date: [5-min bars]} for the last `days` sessions, disk-cached."""
         if sym in self._hist:

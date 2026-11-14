@@ -47,6 +47,34 @@ def test_debate_gate_off_and_suppress():
     assert not ok and "SUPPRESS" in why
 
 
+def test_gap_day_delays_entry_window():
+    ok, why = gates.entry_window(_at(10, 15), open_gap_pct=1.4)
+    assert not ok and "gap" in why
+    assert gates.entry_window(_at(10, 35), open_gap_pct=1.4)[0]
+    assert gates.entry_window(_at(10, 15), open_gap_pct=0.3)[0]
+
+
+def test_event_blackout_fomc_and_nfp():
+    from datetime import date
+    ok, why = gates.event_blackout(date(2026, 12, 9)); assert not ok and "FOMC" in why
+    ok, why = gates.event_blackout(date(2026, 12, 4)); assert not ok and "NFP" in why       # first Friday
+    assert gates.event_blackout(date(2026, 12, 10))[0]
+
+
+def test_slippage_breaker():
+    assert gates.slippage_ok([50, 80])[0]                      # not enough fills yet
+    ok, why = gates.slippage_ok([400, 350, 300, 280, 320]); assert not ok and "halt" in why
+    assert gates.slippage_ok([40, 60, 30, 80, 50])[0]
+
+
+def test_cooldown_and_same_direction():
+    ok, why = gates.cooldown_ok(2, "SPY", "bull"); assert not ok and "Repeat Loser" in why
+    assert gates.cooldown_ok(1, "SPY", "bull")[0]
+    ok, why = gates.same_direction_ok(["bull"], "bull"); assert not ok and "Correlation" in why
+    assert gates.same_direction_ok(["bull"], "bear")[0]
+    assert gates.same_direction_ok([], "bull")[0]
+
+
 # ── day risk ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -88,6 +116,13 @@ def test_contracts_for_respects_both_caps(day):
     assert day.contracts_for(0.80) == 3        # $80 each, $300 cap → 3
     day.register_entry("SPY", "p", 500)
     assert day.contracts_for(0.80) == 1        # $100 of budget left
+
+
+def test_open_directions_tracked(day):
+    day.register_entry("SPY", "p1", 200, "bull")
+    assert day.open_directions() == ["bull"]
+    day.register_close("SPY", 5)
+    assert day.open_directions() == []
 
 
 def test_day_state_persists_and_resets_on_new_date(day, tmp_path):
