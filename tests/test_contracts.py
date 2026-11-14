@@ -16,9 +16,10 @@ def _c(strike, bid, ask, exp=date(2026, 11, 27), oi=1500):
 
 def test_picks_otm_long_and_five_wide_short_passing_all_gates():
     spot, today = 100.4, date(2026, 11, 13)
-    # realistic-ish 7-21 DTE call ladder around 100: ATM ~2.6, decaying outward
-    px = {100: 2.60, 101: 2.10, 102: 1.65, 103: 1.28, 104: 0.97, 105: 0.72, 106: 0.52,
-          107: 0.37, 108: 0.26, 109: 0.18}
+    # SPY-like ladder: strikes are ~0.15% apart so premium decays slowly outward
+    # (measured 2022-26: long 2 OTM on a 5-wide ≈ 0.43 of width)
+    px = {100: 3.30, 101: 3.00, 102: 2.75, 103: 2.50, 104: 2.20, 105: 1.90, 106: 1.62,
+          107: 1.35, 108: 1.10, 109: 0.90}
     chain = [_c(k, v, round(v + 0.02, 2)) for k, v in px.items()]
     cand = contracts.select(FakeBroker(chain), "SPY", "bull", spot, today)
     assert cand is not None and cand.ok, [g for g in cand.gates if not g["ok"]]
