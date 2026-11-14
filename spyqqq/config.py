@@ -58,9 +58,13 @@ TREND_MA_DAYS         = 20             # daily close vs 20d SMA sets the allowed
 PULLBACK_EMA          = 9              # 5-min EMA the pullback must reclaim
 RSI_LEN               = 14
 RSI_MIN, RSI_MAX      = 40, 65         # KB: no chasing (bull); mirrored for bear
-VOL_RATIO_MIN         = 1.0            # reclaim bar volume vs the prior 30 min
-MIN_CONFIDENCE        = 0.55           # historical hit-rate (Wilson lower bound) floor
-MIN_HISTORY_N         = 30             # need this many past occurrences to trust the rate
+VOL_RATIO_MIN         = 0.8            # reclaim bar volume vs the prior 30 min
+# Historical-confidence floor. LEARNING-PHASE values (2026-11-14): measured on 130
+# sessions the rule hits 40–60% (n≈12–20 per symbol/direction) — a 55% lower-bound
+# floor would never trade. 0.35 blocks only the demonstrably bad (QQQ bear: 17%).
+# Raise toward 0.55 as the sample grows; the dashboard shows the live number.
+MIN_CONFIDENCE        = 0.35           # Wilson 95% LOWER bound of the hit rate
+MIN_HISTORY_N         = 10             # past occurrences needed before trading the setup
 
 # ── Vol gate (KB §22) ────────────────────────────────────────────────────────
 VOL_EDGE_REQUIRED     = True

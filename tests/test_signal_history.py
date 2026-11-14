@@ -79,6 +79,7 @@ def test_replay_counts_one_trade_per_day_and_rates():
 
 def test_confidence_gate_requires_sample_and_floor(monkeypatch):
     monkeypatch.setattr(config, "MIN_HISTORY_N", 30)
+    monkeypatch.setattr(config, "MIN_CONFIDENCE", 0.55)
     small = history.HitRate("SPY", "bull", 10, 9, 0.9, 0.6, 0.98, 0.2)
     ok, why = history.confidence_ok(small)
     assert not ok and "10 historical" in why
