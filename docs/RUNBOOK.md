@@ -24,7 +24,7 @@
 | When (ET) | What happens | What you do |
 |---|---|---|
 | boot / 09:30 | engine connects, reconciles, recomputes confidence tables | nothing — check `http://127.0.0.1:5050` shows green pills and the countdown |
-| 10:00–11:30 | scans every 60s; ≤2 spreads, ≤$600 debit | watch the SPY/QQQ cards: signal banner, confidence bars, gate chips |
+| 10:00–11:30 | scans every 60s; ≤3 spreads (2 open), ≤$1,500 debit | watch the SPY/QQQ cards: signal banner, confidence bars, gate chips |
 | 11:30–15:45 | observe-only scans keep the cards live; exits run | nothing |
 | until 15:45 | monitors every 10s; ±20%, stall, ratchet | nothing |
 | 15:45 | flattens; writes `reports/YYYY-MM-DD.md` with the Claude review | **read the report**; change at most one constant in `spyqqq/config.py`; restart |

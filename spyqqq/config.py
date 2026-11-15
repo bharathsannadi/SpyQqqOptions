@@ -17,11 +17,11 @@ UNDERLYINGS           = ("SPY", "QQQ")
 DRY_RUN               = os.environ.get("SPYQQQ_DRY_RUN", "0") == "1"   # decide + log, never order
 
 # ── The daily budget ("limited amount for a day") ────────────────────────────
-DAILY_BUDGET_USD      = 600.0    # total net debit allowed per day
-PER_TRADE_MAX_USD     = 300.0    # KB §4 — max loss per trade (debit spread: max loss = debit)
-MAX_TRADES_PER_DAY    = 2
+DAILY_BUDGET_USD      = 1500.0   # total net debit allowed per day (raised 600→1500 on 2026-11-15, operator)
+PER_TRADE_MAX_USD     = 500.0    # KB §4 — max loss per trade (debit spread: max loss = debit); 300→500
+MAX_TRADES_PER_DAY    = 3        # 2→3: a third entry only after one of the two open spreads closes
 MAX_OPEN              = 2        # one per underlying
-DAILY_LOSS_HALT_USD   = 300.0    # realised loss today ≥ this → no new entries, keep managing
+DAILY_LOSS_HALT_USD   = 750.0    # realised loss today ≥ this → no new entries, keep managing (half the budget, as before)
 MAX_SAME_DIRECTION_OPEN = 1      # SPY+QQQ are one bet (ρ≈0.9): the 2026-06-05 −$2,549 day was 20 same-way longs
 SLIPPAGE_HALT_BPS     = 300.0    # avg fill slippage over the last SLIPPAGE_WINDOW fills ≥ this → halt entries
 SLIPPAGE_WINDOW       = 5        # (2026-06-04: 225 bps avg slippage on relaxed fills was the killer, not stops)

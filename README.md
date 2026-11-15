@@ -6,7 +6,7 @@ review you read before changing anything. Successor to AlpacaTrader
 (see [`docs/CURRENT_SYSTEM.md`](docs/CURRENT_SYSTEM.md) for why).
 
 ```
-Rules (spyqqq/config.py)        Daily budget $600 · $300/trade · 2 trades · 2 open
+Rules (spyqqq/config.py)        Daily budget $1,500 · $500/trade · 3 trades · 2 open
                                 ±20% on net debit · 90-min stall · flatten 15:45 ET
                                 entries 10:00–11:30 ET · 7–21 DTE · 5-wide, long 2–3 strikes OTM
 Setups (both measured)          trend_pullback · vwap_momentum (ported; SPY bull 56%, CI 51–62%, n=287)

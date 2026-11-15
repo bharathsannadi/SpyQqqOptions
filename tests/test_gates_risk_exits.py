@@ -84,7 +84,10 @@ def day(tmp_path, monkeypatch):
     return risk.DayState()
 
 
-def test_per_trade_cap_and_daily_budget(day):
+def test_per_trade_cap_and_daily_budget(day, monkeypatch):
+    monkeypatch.setattr(config, "PER_TRADE_MAX_USD", 300.0)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 600.0)
+    monkeypatch.setattr(config, "MAX_TRADES_PER_DAY", 2)
     assert day.can_enter("SPY", 250)[0]
     ok, why = day.can_enter("SPY", 350); assert not ok and "§4" in why
     day.register_entry("SPY", "p1", 300)
@@ -93,16 +96,26 @@ def test_per_trade_cap_and_daily_budget(day):
     ok, why = day.can_enter("SPY", 10); assert not ok      # 2 trades/day reached
 
 
+def test_live_budget_constants_keep_their_ratios():
+    """The raise on 2026-11-15 kept the shape the learnings set: halt = half the budget,
+    per-trade ≤ a third of the day, and max-open never exceeds the trade count."""
+    assert config.DAILY_LOSS_HALT_USD == config.DAILY_BUDGET_USD / 2
+    assert config.PER_TRADE_MAX_USD * config.MAX_TRADES_PER_DAY <= config.DAILY_BUDGET_USD
+    assert config.MAX_OPEN <= config.MAX_TRADES_PER_DAY
+    assert config.MAX_SAME_DIRECTION_OPEN == 1
+
+
 def test_daily_budget_exhaustion_before_trade_count(day, monkeypatch):
     monkeypatch.setattr(config, "MAX_TRADES_PER_DAY", 5)
     monkeypatch.setattr(config, "MAX_OPEN", 5)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 600.0)
     day.register_entry("SPY", "p1", 300); day.register_close("SPY", 10)
     day.register_entry("QQQ", "p2", 300); day.register_close("QQQ", 10)
     ok, why = day.can_enter("SPY", 100); assert not ok and "daily budget" in why
 
 
 def test_loss_halt_blocks_entries_not_exits(day):
-    day.register_close("SPY", -320)
+    day.register_close("SPY", -(config.DAILY_LOSS_HALT_USD + 20))
     ok, why = day.can_enter("QQQ", 100)
     assert not ok and "daily loss halt" in why
 
@@ -112,7 +125,9 @@ def test_operator_halt_file(day):
     assert not day.can_enter("SPY", 100)[0]
 
 
-def test_contracts_for_respects_both_caps(day):
+def test_contracts_for_respects_both_caps(day, monkeypatch):
+    monkeypatch.setattr(config, "PER_TRADE_MAX_USD", 300.0)
+    monkeypatch.setattr(config, "DAILY_BUDGET_USD", 600.0)
     assert day.contracts_for(0.80) == 3        # $80 each, $300 cap → 3
     day.register_entry("SPY", "p", 500)
     assert day.contracts_for(0.80) == 1        # $100 of budget left
