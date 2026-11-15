@@ -55,6 +55,10 @@ dashboard shows a red "updated 140s ago" pill.
 4. Accepted → one atomic MLEG limit at `net_mid + 0.25 × half-spreads`; 45s fill
    wait; cancel if unfilled. Every step is a ledger row.
 
+Outside the entry window (11:30–16:00) the same scan runs **observe-only** every 60 s: the
+dashboard keeps price, trend, indicators and any setup that fires, but nothing is gated,
+logged or ordered. Snapshots are cleared at the session rollover.
+
 Every 5 min during the session `engine.reconcile_light` compares open spreads with the
 broker: vanished spreads are marked closed, unknown option legs are flattened and logged.
 A spread with no two-sided quote for 10 min is closed at its last mid ×0.95.
@@ -76,6 +80,32 @@ Reported as hit rate, n, and the Wilson 95% interval; the gate uses the lower bo
 The number means: "of the last n sessions where this rule fired on this symbol in
 this direction, the underlying then moved our way this often." It is not a win
 probability for the spread.
+
+## Dashboard (`spyqqq/web.py`, `web/static/app.{js,css}`)
+
+Read-only; polls `/api/status` every 15 s, `/api/ledger` + `/api/summary` every 30 s,
+`/api/reports` every 5 min. Top to bottom it answers the operator's questions in order:
+
+1. **Is it alive and safe?** header pills: PAPER, connected, market, HALTED, heartbeat age
+   (red past 120 s).
+2. **Where are we in the session?** phase card with a 09:30→16:00 timeline, a now-marker
+   and a live countdown to the next boundary (first scan / window close / flatten / bell).
+3. **Today's budget**: equity, realised, budget meter, trade dots, loss-halt meter.
+4. **SPY / QQQ cards**: BUY CALL / PUT SPREAD banner with *Entered / Refused / Outside
+   window* badge and the first failing gate sentence; VWAP / EMA9 / RSI14 (no-chase band)
+   / distance to VWAP; **historical confidence** as a 95%-interval bar per setup × direction
+   (floor and 50% marks, active row highlighted); the gate pipeline as chips in evaluation
+   order with un-reached gates dimmed and every sentence behind a disclosure; the chosen
+   contract; the debate verdict when the gate is on.
+5. **Open spreads** with a −20% … +20% ladder (current mark, ratchet stop, tier, peak).
+6. **Activity**: the ledger for any day, filterable (decisions / trades / engine).
+7. **Performance**: rolling-20 tiles (top-3 share flagged > 40%) and the cumulative P&L
+   curve with hover.
+8. **Daily report** rendered from markdown; rules footer from `limits`.
+
+Dark is the default; light is a toggle. Bull/bear colours were validated for
+colour-blind separation and always ship with ▲/▼ + words, never colour alone.
+`SPYQQQ_STATE_DIR` / `SPYQQQ_REPORT_DIR` point the server at a fixture for visual tests.
 
 ## What is deliberately absent
 

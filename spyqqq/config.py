@@ -102,9 +102,9 @@ DEBATE_MIN_CONFIDENCE = 0.65
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 ROOT        = Path(__file__).resolve().parent.parent
-STATE_DIR   = ROOT / "state"
+STATE_DIR   = Path(os.environ.get("SPYQQQ_STATE_DIR", ROOT / "state"))     # overridable so a fixture can drive the dashboard
 LOG_DIR     = ROOT / "logs"
-REPORT_DIR  = ROOT / "reports"
+REPORT_DIR  = Path(os.environ.get("SPYQQQ_REPORT_DIR", ROOT / "reports"))
 DOCS_DIR    = ROOT / "docs"
 LEDGER_PATH     = STATE_DIR / "ledger.jsonl"
 DAY_STATE_PATH  = STATE_DIR / "day_state.json"

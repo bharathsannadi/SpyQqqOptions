@@ -108,11 +108,13 @@ class Engine:
             if self._reported_for != self.day.date and now.time() >= config.FLATTEN_AT_ET:
                 self.write_report()
 
-        if (market_open and t - self._last_scan >= config.SCAN_INTERVAL_SEC
-                and gates.entry_window(now)[0]):
+        if market_open and t - self._last_scan >= config.SCAN_INTERVAL_SEC:
             self._last_scan = t
+            in_window = gates.entry_window(now)[0]
             for sym in config.UNDERLYINGS:
-                self.scan(sym, now)
+                # outside the window the scan is observe-only: the dashboard keeps showing
+                # price / trend / signal, but nothing is gated, logged or ordered
+                self.scan(sym, now, observe=not in_window)
 
         if t - getattr(self, "_last_status", 0) >= 5:
             self._last_status = t
@@ -130,6 +132,7 @@ class Engine:
             self.day = DayState()
             self.day.save()
             self.hit_rates = {}
+            self.last_signal = {}
             self.refresh_history()
 
     # ── history / confidence ─────────────────────────────────────────────────
@@ -146,7 +149,7 @@ class Engine:
                 log.warning(f"[history] {sym}: {e}")
 
     # ── scan ─────────────────────────────────────────────────────────────────
-    def scan(self, sym: str, now: datetime) -> None:
+    def scan(self, sym: str, now: datetime, observe: bool = False) -> None:
         daily_closes = self.md.daily_closes(sym)
         trend = sig.daily_trend(daily_closes)
         bars = self.md.today_bars(sym)
@@ -158,7 +161,7 @@ class Engine:
         snap = {"ts": now.isoformat(timespec="seconds"), "trend": trend, "bars": len(bars),
                 "price": bars[-1].close if bars else None, "gap_pct": None if gap is None else round(gap, 2),
                 "signal": None, "gates": [], "confidence": None, "candidate": None, "debate": None,
-                "accepted": False}
+                "accepted": False, "observe": observe}
         if bars:
             closes = [b.close for b in bars]
             e = sig.ema_series(closes, config.PULLBACK_EMA)[-1]
@@ -181,6 +184,12 @@ class Engine:
                           "price": s.price, "indicators": s.indicators,
                           "also": [f"{x.setup}:{x.direction}" for x in signals if x is not s]}
         G = lambda name, res: {"gate": name, "ok": res[0], "text": res[1]}
+        if observe:
+            hr = hr_all.get(s.setup, {}).get(s.direction)
+            snap["confidence"] = hr.as_dict() if hr else None
+            snap["gates"] = [G("entry_window", gates.entry_window(now, gap))]
+            self.last_signal[sym] = snap
+            return
         g: list[dict] = [G("entry_window", gates.entry_window(now, gap)),
                          G("event_blackout", gates.event_blackout(now.date()))]
         hr = hr_all.get(s.setup, {}).get(s.direction)

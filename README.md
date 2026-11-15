@@ -22,7 +22,7 @@ Model                           claude-opus-5-5 (debate + EOD review; both skipp
 cp .env.example .env            # paper keys + ANTHROPIC_API_KEY; chmod 600 .env
 /usr/local/Cellar/python@3.11/3.11.15_1/bin/python3.11 -m venv venv
 venv/bin/pip install -r requirements-dev.txt
-make test                       # 78 tests
+make test                       # 84 tests
 make dry                        # engine with DRY_RUN — decides and logs, never orders
 make web                        # http://127.0.0.1:5050
 make install                    # launchd: engine + web + watchdog
@@ -38,7 +38,7 @@ spyqqq/
   signal.py     the entry rule              gates.py     KB rules → (ok, sentence)
   contracts.py  pick the two legs           risk.py      the day's budget
   debate.py     bull/bear/judge             report.py    EOD markdown + Claude review
-  ledger.py     append-only JSONL           web.py       read-only dashboard
+  ledger.py     append-only JSONL           web.py       read-only dashboard (web/static/app.{js,css})
 docs/           CURRENT_SYSTEM.md · LEARNINGS.md · DESIGN.md · RUNBOOK.md · knowledge_base.md
 tests/          hermetic, no network
 launchd/        plists + heartbeat watchdog
