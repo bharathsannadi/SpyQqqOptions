@@ -84,7 +84,7 @@ function renderTiles() {
   const a = S.account || {}, d = S.day || {};
   $('#t-equity').textContent = a.equity != null ? money(a.equity) : '—';
   $('#t-cash').textContent = a.options_bp != null ? `options buying power ${money(a.options_bp)}` : (a.cash != null ? `cash ${money(a.cash)}` : '—');
-  const r = +d.realized_usd || 0; const re = $('#t-real'); re.textContent = signed(r); re.className = 'hero ' + (r > 0 ? 'up' : r < 0 ? 'down' : '');
+  const r = +d.realized_usd || 0; const re = $('#t-real'); re.textContent = signed(r); re.className = 'v ' + (r > 0 ? 'up' : r < 0 ? 'down' : '');
   $('#t-real-sub').textContent = d.date ? `${d.date} · after fees` : 'after fees';
   const used = +d.debit_spent_usd || 0, bud = +d.budget_usd || 1;
   $('#t-budget').textContent = `${money(used)} / ${money(bud)}`;
@@ -184,14 +184,12 @@ function symCard(sym) {
       <span class="meta">${s?.ts ? `scanned ${hhmm(s.ts)} ET · ${s.bars ?? 0} bars` : ''}</span></div>
     <div class="signal ${sigCls}"><div class="big">${big} ${badge} ${strength}</div><div class="why">${why}${esc(alsoTxt)}</div></div>
     <div class="ind">
-      <div><div class="k">VWAP</div><div class="v">${num(ind.vwap)}</div></div>
-      <div><div class="k">EMA 9</div><div class="v">${num(ind.ema9)}</div></div>
-      <div><div class="k">RSI 14</div><div class="v">${rsi != null ? num(rsi, 1) : '—'}</div>${rsiPos != null ? `<div class="rsi" title="no-chase band 40–65"><i style="left:${rsiPos}%"></i></div>` : ''}</div>
-      <div><div class="k">vs VWAP</div><div class="v ${s?.price != null && ind.vwap != null ? (s.price >= ind.vwap ? 'up' : 'down') : ''}">${s?.price != null && ind.vwap != null ? pct((s.price - ind.vwap) / ind.vwap * 100, 2) : '—'}</div></div>
+      <span><span class="k">VWAP</span><b>${num(ind.vwap)}</b> <span class="${s?.price != null && ind.vwap != null ? (s.price >= ind.vwap ? 'up' : 'down') : ''}">${s?.price != null && ind.vwap != null ? pct((s.price - ind.vwap) / ind.vwap * 100, 2) : ''}</span></span>
+      <span><span class="k">EMA9</span><b>${num(ind.ema9)}</b></span>
+      <span><span class="k">RSI14</span><b>${rsi != null ? num(rsi, 1) : '—'}</b>${rsiPos != null ? `<span class="rsi" title="no-chase band 40–65"><i style="left:${rsiPos}%"></i></span>` : ''}</span>
     </div>
-    <div class="sect"><div class="eyebrow"><span>Historical confidence</span><span>floor ${((L.min_confidence ?? 0.35) * 100).toFixed(0)}% · ▮ 50%</span></div>
-      <div class="conf">${confidenceRows(sym, hist, sig, L)}</div>
-      <div class="conf-legend">Bar = 95% interval of the hit rate when this rule fired on past sessions (first touch of ±0.30% before 15:45). Dot = hit rate. The gate uses the bar's left edge. Not a win probability for the spread.</div></div>
+    <div class="sect"><div class="eyebrow"><span>Historical confidence <span class="i" title="Bar = 95% interval of the hit rate when this rule fired on past sessions (first touch of ±0.30% before 15:45). Dot = hit rate. The gate uses the bar's left edge. Not a win probability for the spread.">ⓘ</span></span><span>floor ${((L.min_confidence ?? 0.35) * 100).toFixed(0)}% · ▮ 50%</span></div>
+      <div class="conf">${confidenceRows(sym, hist, sig, L)}</div></div>
     ${sig && !s.observe ? `<div class="sect"><div class="eyebrow">Gate pipeline</div>${gatesHtml}</div>` : ''}
     ${cand}${debate}`;
 }
@@ -201,6 +199,7 @@ function cand_label(c) { return `${c.sym} ${c.long_strike}/${c.short_strike} ${c
 function renderOpen() {
   const el = $('#open'); if (!S) { el.innerHTML = ''; return; }
   const rows = S.open || [], tp = (S.limits?.tp_pct ?? .2) * 100, sl = (S.limits?.sl_pct ?? .2) * 100;
+  const nb = $('#n-open'); nb.hidden = !rows.length; nb.textContent = rows.length;
   if (!rows.length) { el.innerHTML = `<p class="empty"><strong>Flat.</strong> Nothing open; nothing is ever held overnight.</p>`; return; }
   el.innerHTML = rows.map(p => {
     const pnl = +p.pnl_pct || 0, pos = Math.min(100, Math.max(0, (pnl + sl) / (tp + sl) * 100));
@@ -248,6 +247,7 @@ async function renderActivity() {
   try { rows = await (await fetch('/api/ledger?day=' + day)).json(); } catch (e) { rows = []; }
   const keep = r => actFilter === 'all' || (actFilter === 'decision' && r.kind === 'decision') || (actFilter === 'trade' && ['fill', 'close', 'orphan'].includes(r.kind)) || (actFilter === 'engine' && r.kind === 'engine');
   const list = rows.filter(keep).reverse();
+  if (day === etParts().date) { const na = $('#n-activity'), n = rows.filter(r => r.kind !== 'engine').length; na.hidden = !n; na.textContent = n; }
   const el = $('#activity');
   if (!list.length) {
     el.innerHTML = `<p class="empty"><strong>Nothing ${actFilter === 'all' ? '' : 'in this filter '}on ${day}.</strong> ${day === etParts().date ? 'Decisions appear here from the first scan at ' + (S?.limits?.entry_start || '10:00') + ' ET; refused setups are logged with the gate that stopped them.' : ''}</p>`;
@@ -343,7 +343,24 @@ function renderRules() {
     item('Exits', `±${(L.tp_pct * 100).toFixed(0)}% · stall ${L.stall_min} min · flatten ${L.flatten} ET`) + item('Entries', `${L.entry_window} · gap ≥${L.gap_delay_pct}% → ${L.gap_delay_start}`) +
     item('DTE', L.dte) + item('Confidence floor', `${(L.min_confidence * 100).toFixed(0)}% · n ≥ ${L.min_history_n}`) +
     item('Debate', L.debate_enabled ? L.debate_model : 'off') + item('Setups', (L.setups || []).map(s => SETUP_LABEL[s] || s).join(' · '));
+  const H = S.history || {}; let rows = '';
+  for (const sym of Object.keys(H)) for (const st of Object.keys(H[sym])) for (const dir of ['bull', 'bear']) {
+    const h = H[sym][st][dir]; if (!h) continue;
+    rows += `<tr><td>${sym} · ${esc(SETUP_LABEL[st] || st)} ${dir === 'bull' ? '▲' : '▼'}</td><td>${h.n}</td><td>${((h.rate || 0) * 100).toFixed(0)}%</td><td class="${(h.lower95 || 0) >= .5 ? 'good' : ''}">${((h.lower95 || 0) * 100).toFixed(0)}%</td><td>${((h.upper95 || 0) * 100).toFixed(0)}%</td><td>${h.avg_move_pct != null ? pct(h.avg_move_pct, 3) : '—'}</td></tr>`;
+  }
+  $('#hist-table').innerHTML = rows ? `<table><thead><tr><th>Setup · direction</th><th>n</th><th>hit</th><th>95% low</th><th>95% high</th><th>avg move</th></tr></thead><tbody>${rows}</tbody></table><p class="hint" style="margin:6px 0 0">Replay of the same rule over every cached session inside today's entry window; outcome = first touch of ±0.30% before 15:45. Green = lower bound clears a coin flip.</p>` : '';
 }
+
+// ── tabs ─────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  for (const b of $('#tabs').children) b.classList.toggle('on', b.dataset.tab === name);
+  for (const p of document.querySelectorAll('.panel')) p.classList.toggle('on', p.dataset.panel === name);
+  try { localStorage.setItem('tab', name); } catch (e) {}
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+}
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
+(() => { const h = location.hash.slice(1); let t = null; try { t = localStorage.getItem('tab'); } catch (e) {}
+  const valid = [...$('#tabs').children].map(b => b.dataset.tab); showTab(valid.includes(h) ? h : valid.includes(t) ? t : 'desk'); })();
 
 // ── polling ──────────────────────────────────────────────────────────────────
 async function refreshStatus() {

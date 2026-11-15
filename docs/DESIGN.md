@@ -85,7 +85,11 @@ probability for the spread.
 ## Dashboard (`spyqqq/web.py`, `web/static/app.{js,css}`)
 
 Read-only; polls `/api/status` every 15 s, `/api/ledger` + `/api/summary` every 30 s,
-`/api/reports` every 5 min. Top to bottom it answers the operator's questions in order:
+`/api/reports` every 5 min. Terminal density (12.5px base), always-visible status strip
+(pills, phase timeline + countdown, five KPIs) and five tabs — **Desk** (SPY/QQQ cards +
+open spreads, fits 1440×900 without scrolling), **Activity**, **Performance**, **Report**,
+**Rules** (limits + the full confidence table). The active tab is kept in the URL hash and
+localStorage. It answers the operator's questions in order:
 
 1. **Is it alive and safe?** header pills: PAPER, connected, market, HALTED, heartbeat age
    (red past 120 s).

@@ -11,10 +11,7 @@
 <div class="glow glow-a"></div><div class="glow glow-b"></div><div class="glow glow-c"></div>
 
 <header class="top">
-  <div class="brand">
-    <span class="logo">SPY<em>/</em>QQQ</span>
-    <span class="tag">options desk · paper</span>
-  </div>
+  <div class="brand"><span class="logo">SPY<em>/</em>QQQ</span><span class="tag">desk · paper</span></div>
   <div class="pills" id="pills">
     <span class="pill" id="p-mode">—</span>
     <span class="pill" id="p-conn">—</span>
@@ -25,77 +22,96 @@
   <button class="theme" id="theme" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
 </header>
 
-<main>
-  <!-- ── session phase ───────────────────────────────────────────── -->
-  <section class="card phase" id="phase">
-    <div class="phase-head">
-      <div>
-        <div class="eyebrow" id="phase-eyebrow">Session</div>
-        <div class="phase-title" id="phase-title">—</div>
-      </div>
-      <div class="countdown"><span id="phase-next">—</span><strong id="phase-count">—</strong></div>
+<!-- ── always-visible strip: phase + KPIs ─────────────────────────────── -->
+<section class="strip">
+  <div class="phase" id="phase">
+    <div class="phase-text">
+      <span class="eyebrow" id="phase-eyebrow">Session</span>
+      <span class="phase-title" id="phase-title">—</span>
     </div>
     <div class="timeline" id="timeline" role="img" aria-label="Session timeline">
-      <div class="seg pre"   style="--a:0;   --b:7.7"  ><span>09:30 open</span></div>
-      <div class="seg entry" style="--a:7.7; --b:30.8" ><span>10:00–11:30 entries</span></div>
-      <div class="seg manage"style="--a:30.8;--b:96.2" ><span>manage exits</span></div>
-      <div class="seg flat"  style="--a:96.2;--b:100"  ><span>15:45</span></div>
+      <div class="seg pre"   style="--a:0;   --b:9"   title="09:30 open · no entries"><span>09:30</span></div>
+      <div class="seg entry" style="--a:9;   --b:30.8" title="10:05–11:30 entries"><span>10:05–11:30</span></div>
+      <div class="seg manage"style="--a:30.8;--b:96.2" title="manage exits"><span>manage</span></div>
+      <div class="seg flat"  style="--a:96.2;--b:100"  title="15:45 flatten"><span>15:45</span></div>
       <div class="now" id="now" hidden><i></i></div>
     </div>
-  </section>
+    <div class="countdown"><span id="phase-next">—</span><strong id="phase-count">—</strong></div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><span class="k">Equity</span><span class="v" id="t-equity">—</span><span class="s" id="t-cash">—</span></div>
+    <div class="kpi"><span class="k">Realised</span><span class="v" id="t-real">—</span><span class="s" id="t-real-sub">today</span></div>
+    <div class="kpi"><span class="k">Budget</span><span class="v" id="t-budget">—</span><span class="meter"><i id="m-budget"></i></span><span class="s" id="t-budget-sub">—</span></div>
+    <div class="kpi"><span class="k">Trades</span><span class="v" id="t-trades">—</span><span class="dots" id="d-trades"></span><span class="s" id="t-open-sub">—</span></div>
+    <div class="kpi"><span class="k">Loss halt</span><span class="v" id="t-halt">—</span><span class="meter warn"><i id="m-halt"></i></span><span class="s" id="t-halt-sub">—</span></div>
+  </div>
+</section>
 
-  <!-- ── day tiles ───────────────────────────────────────────────── -->
-  <section class="tiles" id="tiles">
-    <div class="tile"><div class="eyebrow">Equity</div><div class="hero" id="t-equity">—</div><div class="sub" id="t-cash">—</div></div>
-    <div class="tile"><div class="eyebrow">Realised today</div><div class="hero" id="t-real">—</div><div class="sub" id="t-real-sub">after fees</div></div>
-    <div class="tile"><div class="eyebrow">Budget used</div><div class="hero" id="t-budget">—</div><div class="meter"><i id="m-budget"></i></div><div class="sub" id="t-budget-sub">—</div></div>
-    <div class="tile"><div class="eyebrow">Trades</div><div class="hero" id="t-trades">—</div><div class="dots" id="d-trades"></div><div class="sub" id="t-open-sub">—</div></div>
-    <div class="tile"><div class="eyebrow">Loss halt</div><div class="hero" id="t-halt">—</div><div class="meter warn"><i id="m-halt"></i></div><div class="sub" id="t-halt-sub">—</div></div>
-  </section>
+<nav class="tabs" id="tabs" role="tablist">
+  <button class="tab on" data-tab="desk" role="tab">Desk</button>
+  <button class="tab" data-tab="activity" role="tab">Activity <span class="n" id="n-activity" hidden></span></button>
+  <button class="tab" data-tab="perf" role="tab">Performance</button>
+  <button class="tab" data-tab="report" role="tab">Report</button>
+  <button class="tab" data-tab="rules" role="tab">Rules</button>
+</nav>
 
-  <!-- ── symbols ─────────────────────────────────────────────────── -->
-  <section class="symbols">
-    <article class="card sym" id="sym-SPY" data-sym="SPY"></article>
-    <article class="card sym" id="sym-QQQ" data-sym="QQQ"></article>
-  </section>
-
-  <!-- ── open spreads ────────────────────────────────────────────── -->
-  <section class="card">
-    <div class="card-head"><h2>Open spreads</h2><span class="hint">exits checked every 10 s · ±20% · 90-min stall · ratchet</span></div>
-    <div id="open"></div>
-  </section>
-
-  <!-- ── activity ────────────────────────────────────────────────── -->
-  <section class="card">
-    <div class="card-head">
-      <h2>Activity</h2>
-      <div class="controls">
-        <div class="chips" id="act-filter">
-          <button class="chip on" data-f="all">All</button>
-          <button class="chip" data-f="decision">Decisions</button>
-          <button class="chip" data-f="trade">Trades</button>
-          <button class="chip" data-f="engine">Engine</button>
-        </div>
-        <input type="date" id="act-day">
-      </div>
+<main>
+  <!-- ── DESK ──────────────────────────────────────────────────────────── -->
+  <section class="panel on" data-panel="desk">
+    <div class="symbols">
+      <article class="card sym" id="sym-SPY" data-sym="SPY"></article>
+      <article class="card sym" id="sym-QQQ" data-sym="QQQ"></article>
     </div>
-    <div class="activity" id="activity"></div>
+    <div class="card open-card">
+      <div class="card-head"><h2>Open spreads <span class="n" id="n-open" hidden></span></h2><span class="hint">checked every 10 s · ±20% · 90-min stall · ratchet</span></div>
+      <div id="open"></div>
+    </div>
   </section>
 
-  <!-- ── performance ─────────────────────────────────────────────── -->
-  <section class="card">
-    <div class="card-head"><h2>Performance</h2><span class="hint">closed trades · rolling 20 sessions</span></div>
-    <div class="perf-tiles" id="perf-tiles"></div>
-    <div class="chart" id="chart"></div>
+  <!-- ── ACTIVITY ──────────────────────────────────────────────────────── -->
+  <section class="panel" data-panel="activity">
+    <div class="card">
+      <div class="card-head">
+        <h2>Activity</h2>
+        <div class="controls">
+          <div class="chips" id="act-filter">
+            <button class="chip on" data-f="all">All</button>
+            <button class="chip" data-f="decision">Decisions</button>
+            <button class="chip" data-f="trade">Trades</button>
+            <button class="chip" data-f="engine">Engine</button>
+          </div>
+          <input type="date" id="act-day">
+        </div>
+      </div>
+      <div class="activity" id="activity"></div>
+    </div>
   </section>
 
-  <!-- ── daily report ────────────────────────────────────────────── -->
-  <section class="card">
-    <div class="card-head"><h2>Daily report</h2><select id="reports"></select></div>
-    <div class="report" id="report"><p class="empty">No reports yet.</p></div>
+  <!-- ── PERFORMANCE ───────────────────────────────────────────────────── -->
+  <section class="panel" data-panel="perf">
+    <div class="card">
+      <div class="card-head"><h2>Performance</h2><span class="hint">closed trades · rolling 20 sessions · fees included</span></div>
+      <div class="perf-tiles" id="perf-tiles"></div>
+      <div class="chart" id="chart"></div>
+    </div>
   </section>
 
-  <footer class="rules" id="rules"></footer>
+  <!-- ── REPORT ────────────────────────────────────────────────────────── -->
+  <section class="panel" data-panel="report">
+    <div class="card">
+      <div class="card-head"><h2>Daily report</h2><select id="reports"></select></div>
+      <div class="report" id="report"><p class="empty">No reports yet.</p></div>
+    </div>
+  </section>
+
+  <!-- ── RULES ─────────────────────────────────────────────────────────── -->
+  <section class="panel" data-panel="rules">
+    <div class="card">
+      <div class="card-head"><h2>Rules in force</h2><span class="hint">from spyqqq/config.py · change there, restart</span></div>
+      <div class="rules" id="rules"></div>
+      <div class="hist-table" id="hist-table"></div>
+    </div>
+  </section>
 </main>
 
 <script src="/static/app.js?v={{ v }}"></script>
