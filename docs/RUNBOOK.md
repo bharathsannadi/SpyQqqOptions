@@ -2,8 +2,10 @@
 
 ## First Monday (2026-11-16) checklist
 
-1. **Anthropic credits** — console.anthropic.com → Plans & Billing. Without them the debate
-   gate fails closed and nothing trades. (Or `DEBATE_ENABLED = False` + restart.)
+1. **Debate gate is OFF** (`DEBATE_ENABLED = False`, set 2026-11-15) because the Anthropic
+   key has no credits. Entries are gated by the KB rules + historical confidence only, and the
+   EOD report prints "review unavailable" instead of the Claude paragraph. When credits are
+   added (console.anthropic.com → Plans & Billing): set `DEBATE_ENABLED = True`, restart.
 2. At 09:35 confirm the four legacy sells (CVNA/INTC/NVDA/PLTR) filled: the old paper
    positions should be gone from the Alpaca paper account.
 3. `make status` → `connected=True`, `status_age` small, history lines for both setups.
@@ -33,7 +35,7 @@ make report                 # regenerate + print today's report
 venv/bin/python -m spyqqq history   # confidence table
 venv/bin/python -m spyqqq halt      # no new entries; exits keep running
 venv/bin/python -m spyqqq resume
-make test                   # 68 hermetic tests, < 1s
+make test                   # 78 hermetic tests, < 1s
 make dry                    # run the engine with DRY_RUN (decides, logs, never orders)
 ```
 

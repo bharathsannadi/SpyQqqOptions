@@ -12,8 +12,8 @@ Rules (spyqqq/config.py)        Daily budget $600 · $300/trade · 2 trades · 2
 Setups (both measured)          trend_pullback · vwap_momentum (ported; SPY bull 56%, CI 51–62%, n=287)
 Gates (each logs its KB §)      §3 window+gap · §17 event blackout · §12 historical confidence
                                 §7 cooldown · §5 correlation · §9 fill quality · §22 vol edge
-                                §9 liquidity · §5 spread pricing · §4 day risk · debate
-Model                           claude-opus-5-5 (debate + EOD review)
+                                §9 liquidity · §5 spread pricing · §4 day risk · debate (OFF until API credits)
+Model                           claude-opus-5-5 (debate + EOD review; both skipped gracefully without credits)
 ```
 
 ## Quick start
@@ -22,7 +22,7 @@ Model                           claude-opus-5-5 (debate + EOD review)
 cp .env.example .env            # paper keys + ANTHROPIC_API_KEY; chmod 600 .env
 /usr/local/Cellar/python@3.11/3.11.15_1/bin/python3.11 -m venv venv
 venv/bin/pip install -r requirements-dev.txt
-make test                       # 68 tests
+make test                       # 78 tests
 make dry                        # engine with DRY_RUN — decides and logs, never orders
 make web                        # http://127.0.0.1:5050
 make install                    # launchd: engine + web + watchdog

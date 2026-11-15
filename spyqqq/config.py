@@ -95,7 +95,7 @@ MIN_VOL_EDGE_PTS      = 1.0
 IV_HISTORY_MIN_DAYS   = 20             # iv_rank only once we've logged this many sessions
 
 # ── LLM gates ────────────────────────────────────────────────────────────────
-DEBATE_ENABLED        = True
+DEBATE_ENABLED        = False          # 2026-11-15: OFF until Anthropic credits exist (was failing CLOSED → zero trades)
 DEBATE_MODEL          = os.environ.get("SPYQQQ_MODEL", "claude-opus-5-5")
 REVIEW_MODEL          = os.environ.get("SPYQQQ_REVIEW_MODEL", "claude-opus-5-5")
 DEBATE_MIN_CONFIDENCE = 0.65

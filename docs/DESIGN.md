@@ -50,7 +50,8 @@ dashboard shows a red "updated 140s ago" pill.
      (debit 25–45% of width; long 2–3 OTM on a 5-wide, per the option-cache measurement)
    - `§4 day_risk` — `risk.DayState.can_enter`: per-trade cap, daily budget, trade count,
      max open, loss halt, operator HALT file
-   - `debate` — bull / bear / judge on Opus 5.5; fails **closed** on any error
+   - `debate` — bull / bear / judge on Opus 5.5; fails **closed** on any error.
+     `DEBATE_ENABLED = False` since 2026-11-15 (no API credits) → gate reports OFF and passes.
 4. Accepted → one atomic MLEG limit at `net_mid + 0.25 × half-spreads`; 45s fill
    wait; cancel if unfilled. Every step is a ledger row.
 
