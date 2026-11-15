@@ -9,7 +9,9 @@ review you read before changing anything. Successor to AlpacaTrader
 Rules (spyqqq/config.py)        Daily budget $600 · $300/trade · 2 trades · 2 open
                                 ±20% on net debit · 90-min stall · flatten 15:45 ET
                                 entries 10:00–11:30 ET · 7–21 DTE · 5-wide, long 2–3 strikes OTM
-Gates (each logs its KB §)      §3 window · §12 historical confidence · §22 vol edge
+Setups (both measured)          trend_pullback · vwap_momentum (ported; SPY bull 56%, CI 51–62%, n=287)
+Gates (each logs its KB §)      §3 window+gap · §17 event blackout · §12 historical confidence
+                                §7 cooldown · §5 correlation · §9 fill quality · §22 vol edge
                                 §9 liquidity · §5 spread pricing · §4 day risk · debate
 Model                           claude-opus-5-5 (debate + EOD review)
 ```
@@ -37,7 +39,7 @@ spyqqq/
   contracts.py  pick the two legs           risk.py      the day's budget
   debate.py     bull/bear/judge             report.py    EOD markdown + Claude review
   ledger.py     append-only JSONL           web.py       read-only dashboard
-docs/           CURRENT_SYSTEM.md · DESIGN.md · RUNBOOK.md · knowledge_base.md
+docs/           CURRENT_SYSTEM.md · LEARNINGS.md · DESIGN.md · RUNBOOK.md · knowledge_base.md
 tests/          hermetic, no network
 launchd/        plists + heartbeat watchdog
 state/ logs/ reports/   runtime (gitignored)

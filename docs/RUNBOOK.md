@@ -1,5 +1,21 @@
 # Runbook
 
+## First Monday (2026-11-16) checklist
+
+1. **Anthropic credits** — console.anthropic.com → Plans & Billing. Without them the debate
+   gate fails closed and nothing trades. (Or `DEBATE_ENABLED = False` + restart.)
+2. At 09:35 confirm the four legacy sells (CVNA/INTC/NVDA/PLTR) filled: the old paper
+   positions should be gone from the Alpaca paper account.
+3. `make status` → `connected=True`, `status_age` small, history lines for both setups.
+4. Dashboard shows SPY/QQQ cards with per-setup confidence rows.
+5. After 15:45 read `reports/2026-11-16.md`.
+
+## Yearly / monthly maintenance
+
+- `EVENT_BLACKOUT_DATES` in `spyqqq/config.py`: FOMC decision days (seeded for 2026 —
+  verify against federalreserve.gov each January) and CPI release days (add from the BLS
+  calendar). NFP is automatic (first Friday).
+
 ## Daily
 
 | When (ET) | What happens | What you do |

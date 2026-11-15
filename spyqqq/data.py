@@ -39,7 +39,7 @@ class MarketData:
     def __init__(self, broker):
         self.b = broker
         self._daily: dict[str, tuple[date, list[dict]]] = {}
-        self._hist: dict[str, dict[date, list[Bar]]] = {}
+        self._hist: dict[str, tuple[date, dict[date, list[Bar]]]] = {}
 
     # ── daily ────────────────────────────────────────────────────────────────
     def daily(self, sym: str) -> list[dict]:
@@ -119,8 +119,10 @@ class MarketData:
 
     def history(self, sym: str, days: int = HISTORY_DAYS) -> dict[date, list[Bar]]:
         """{session_date: [5-min bars]} for the last `days` sessions, disk-cached."""
-        if sym in self._hist:
-            return self._hist[sym]
+        today = datetime.now(ET).date()
+        cached = self._hist.get(sym)
+        if cached and cached[0] == today:          # refreshed once per session, like daily()
+            return cached[1]
         path = config.BARS_CACHE_DIR / f"{sym}_5m.jsonl"
         by_day: dict[date, list[Bar]] = defaultdict(list)
         last_ts: Optional[datetime] = None
@@ -168,7 +170,7 @@ class MarketData:
             bars = [x for x in by_day[d] if "09:30" <= x.ts.strftime("%H:%M") <= "16:00"]
             if len(bars) >= 30:
                 out[d] = sorted(bars, key=lambda x: x.ts)
-        self._hist[sym] = out
+        self._hist[sym] = (today, out)
         return out
 
     # ── implied vol ──────────────────────────────────────────────────────────

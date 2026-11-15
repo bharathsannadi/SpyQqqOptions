@@ -27,13 +27,23 @@ dashboard shows a red "updated 140s ago" pill.
 
 ## The pipeline for one scan (`engine.scan`)
 
-1. `signal.daily_trend` — close vs 20-day SMA fixes the only allowed direction.
-2. `signal.evaluate` — on today's closed 5-min bars: pullback through EMA9, reclaim
-   bar in the trend direction, RSI14 in the no-chase band, volume ≥ 0.8× session avg.
+1. `signal.daily_trend` — close vs 20-day SMA (required by trend_pullback only).
+2. `signal.evaluate_all` — every enabled setup on today's closed 5-min bars:
+   - `trend_pullback`: pullback through EMA9, reclaim bar in the trend direction,
+     RSI14 in the no-chase band, volume ≥ 0.8× the prior 30 min.
+   - `vwap_momentum` (ported from AlpacaTrader — the one signal with measured edge):
+     close vs session VWAP, >50% of recent bars on that side, EMA9 vs EMA21,
+     MACD(12,26,9) histogram sign, volume ≥ 1.0× trailing 20 bars, closing in the
+     direction. EMAs/MACD warm up on the prior session's bars.
+   If several fire, the setup with the best historical Wilson lower bound is taken.
 3. Gates, cheapest first, each returning `(ok, KB sentence)`:
-   - `§3 entry_window`
+   - `§3 entry_window` (entries from 10:30 on a ≥1% opening gap)
+   - `§17 event_blackout` — FOMC decision days (operator list) and first-Friday NFP
    - `§12 confidence` — `history.replay` of the same rule over the cached sessions;
      Wilson 95% lower bound ≥ `MIN_CONFIDENCE` with `n ≥ MIN_HISTORY_N`
+   - `§7 cooldown` — 2 stop-outs on this symbol+direction in 5 sessions → skip
+   - `§5 same_direction` — SPY and QQQ are one bet; max 1 open per direction
+   - `§9 fill_quality` — avg slippage of the last 5 real fills < 300 bps
    - `§22 vol_edge` — `0.45·HV5 + 0.35·IV30 + 0.20·HV30 > IV30 + 1pt`; missing IV refuses
    - contract gates from `contracts.select`: `§3 dte`, `§9 liquidity` (OI, two-sided
      quote), `§9 spread_cost` (both legs' quote width ≤ 10% of debit), `§5 spread_ratio`
@@ -43,6 +53,10 @@ dashboard shows a red "updated 140s ago" pill.
    - `debate` — bull / bear / judge on Opus 5.5; fails **closed** on any error
 4. Accepted → one atomic MLEG limit at `net_mid + 0.25 × half-spreads`; 45s fill
    wait; cancel if unfilled. Every step is a ledger row.
+
+Every 5 min during the session `engine.reconcile_light` compares open spreads with the
+broker: vanished spreads are marked closed, unknown option legs are flattened and logged.
+A spread with no two-sided quote for 10 min is closed at its last mid ×0.95.
 
 ## Exits (`exits.check`, every 10s)
 
