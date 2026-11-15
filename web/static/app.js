@@ -10,9 +10,9 @@ const pct = (v, d = 0) => (v > 0 ? '+' : '') + (+v).toFixed(d) + '%';
 const num = (v, d = 2) => v == null ? '—' : (+v).toFixed(d);
 const hhmm = ts => ts ? ts.slice(11, 16) : '—';
 const GATE_LABEL = {entry_window: 'Window', event_blackout: 'Events', confidence: 'Confidence', cooldown: 'Cooldown',
-  same_direction: 'Correlation', fill_quality: 'Fill quality', vol_edge: 'Vol edge', chain: 'Chain', dte: 'DTE',
+  same_direction: 'Correlation', fill_quality: 'Fill quality', drawdown: 'Drawdown', vol_edge: 'Vol edge', chain: 'Chain', dte: 'DTE',
   liquidity: 'Liquidity', spread_cost: 'Spread cost', spread_ratio: 'Pricing', day_risk: 'Budget', debate: 'Debate'};
-const GATE_ORDER = ['entry_window','event_blackout','confidence','cooldown','same_direction','fill_quality','vol_edge','dte','liquidity','spread_cost','spread_ratio','day_risk','debate'];
+const GATE_ORDER = ['entry_window','event_blackout','confidence','cooldown','same_direction','fill_quality','drawdown','vol_edge','dte','liquidity','spread_cost','spread_ratio','day_risk','debate'];
 const SETUP_LABEL = {trend_pullback: 'Trend pullback', vwap_momentum: 'VWAP momentum'};
 
 let S = null;            // last /api/status

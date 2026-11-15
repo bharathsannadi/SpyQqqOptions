@@ -3262,3 +3262,13 @@ Invariant enforced by raising `ValueError`: **only LONG stock and SHORT options 
 
 
 ---
+
+
+## §BK — Targeted re-read for the SPY/QQQ debit-spread bot — added 2026-11-15
+
+Full table with sources and status in `docs/BOOK_LEARNINGS.md`. The rules the code now cites:
+
+- **BK-1 Leg choice follows IV (Natenberg, *Option Volatility and Pricing* ch. 12):** when implied volatility is low the spread should *buy* the at-the-money option; when high, *sell* it. Our §22 gate only admits trades when realised > implied, so the long leg is tried nearest the money first (`LONG_OFFSETS = (1, 2, 3)`), falling back OTM only to satisfy §5's 25–45% debit band.
+- **BK-3 10:00 ET is a release slot (Stock Market Volatility, 2009, ch. on business time):** activity runs 5.3× physical time 09:30–10:00 and decays after; ISM/JOLTS/UMich print at 10:00. Entries start 10:05 so that bar is closed.
+- **BK-4 Triple witching (Stock Trader's Almanac; Smith ch. 28):** third Friday of Mar/Jun/Sep/Dec carries index futures + options expiry *and* SPY/QQQ ex-dividend (early-assignment risk on short calls). Blackout.
+- **BK-6 Rolling drawdown halt (Elder 6%-month rule, Davey ret/DD ≥ 2):** net realised over the last 10 sessions ≤ −2 daily budgets → no new entries until the operator reviews.

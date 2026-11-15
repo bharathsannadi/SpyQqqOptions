@@ -1,5 +1,6 @@
+import json
 """KB gates, the day's money rules, and the exit rules."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import pytz, pytest
 
 from spyqqq import config, exits, gates, risk
@@ -16,6 +17,7 @@ def _at(h, m):
 
 def test_entry_window_text_names_the_section():
     ok, why = gates.entry_window(_at(10, 15)); assert ok and "§3" in why
+    assert not gates.entry_window(_at(10, 2))[0]        # 10:00 ET release bar must be closed first
     ok, why = gates.entry_window(_at(9, 45)); assert not ok and "§3" in why
     assert not gates.entry_window(_at(13, 0))[0]
 
@@ -52,6 +54,26 @@ def test_gap_day_delays_entry_window():
     assert not ok and "gap" in why
     assert gates.entry_window(_at(10, 35), open_gap_pct=1.4)[0]
     assert gates.entry_window(_at(10, 15), open_gap_pct=0.3)[0]
+
+
+def test_witching_blackout_and_drawdown_gate():
+    ok, why = gates.event_blackout(date(2026, 12, 18)); assert not ok and "witching" in why     # 3rd Fri of Dec
+    assert gates.event_blackout(date(2026, 11, 20))[0]                                            # 3rd Fri of Nov: fine
+    assert gates.event_blackout(date(2026, 12, 11))[0]                                            # 2nd Fri of Dec: fine
+    ok, why = gates.drawdown_ok(-config.ROLLING_LOSS_HALT_USD); assert not ok and "§RM" in why and "Elder" in why
+    assert gates.drawdown_ok(-config.ROLLING_LOSS_HALT_USD + 1)[0]
+
+
+def test_recent_net_usd_dedupes_and_windows(tmp_path, monkeypatch):
+    from spyqqq.ledger import Ledger
+    led = Ledger(tmp_path / "l.jsonl")
+    rows = [("2026-11-02T12:00:00-05:00", "a", -900.0), ("2026-11-02T12:00:05-05:00", "a", -900.0),   # dup
+            ("2026-11-03T12:00:00-05:00", "b", 100.0), ("2026-11-04T12:00:00-05:00", "c", -200.0)]
+    for ts, pid, pnl in rows:
+        led.path.open("a").write(json.dumps({"ts": ts, "kind": "close", "mode": "paper", "setup": "s", "sym": "SPY",
+                                             "pos_id": pid, "exit": 1.0, "pnl_usd": pnl}) + "\n")
+    assert risk.recent_net_usd(led, 10) == -1000.0
+    assert risk.recent_net_usd(led, 2) == -100.0
 
 
 def test_event_blackout_fomc_and_nfp():

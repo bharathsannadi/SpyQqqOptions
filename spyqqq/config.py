@@ -22,6 +22,8 @@ PER_TRADE_MAX_USD     = 500.0    # KB §4 — max loss per trade (debit spread: 
 MAX_TRADES_PER_DAY    = 3        # 2→3: a third entry only after one of the two open spreads closes
 MAX_OPEN              = 2        # one per underlying
 DAILY_LOSS_HALT_USD   = 750.0    # realised loss today ≥ this → no new entries, keep managing (half the budget, as before)
+ROLLING_LOSS_HALT_USD = 3000.0   # net realised over the last ROLLING_LOSS_SESSIONS ≤ −this → no new entries (BK-6: Elder 6%-month rule, budget-relative)
+ROLLING_LOSS_SESSIONS = 10
 MAX_SAME_DIRECTION_OPEN = 1      # SPY+QQQ are one bet (ρ≈0.9): the 2026-06-05 −$2,549 day was 20 same-way longs
 SLIPPAGE_HALT_BPS     = 300.0    # avg fill slippage over the last SLIPPAGE_WINDOW fills ≥ this → halt entries
 SLIPPAGE_WINDOW       = 5        # (2026-06-04: 225 bps avg slippage on relaxed fills was the killer, not stops)
@@ -42,7 +44,7 @@ EXIT_FLOOR2_GAIN      = 0.20
 EXIT_FLOOR2_LOCK      = 0.10
 
 # ── Session windows (ET) ─────────────────────────────────────────────────────
-ENTRY_WINDOW_START_ET = time(10, 0)    # KB §3: never the first 30 min
+ENTRY_WINDOW_START_ET = time(10, 5)    # KB §3: never the first 30 min; 10:05 so the 10:00 ET release bar (ISM/JOLTS/UMich) is closed first (BK-3)
 ENTRY_WINDOW_END_ET   = time(11, 30)
 GAP_DELAY_PCT         = 1.0            # |open gap| ≥ this % → entries start 30 min later (TODO #12 gap-day)
 GAP_DELAY_START_ET    = time(10, 30)
@@ -55,6 +57,7 @@ RECONCILE_EVERY_SEC   = 300            # verify open spreads against the BROKER,
 EVENT_BLACKOUT_DATES  = {"2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17",
                          "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09"}
 NFP_BLACKOUT          = True
+WITCHING_BLACKOUT     = True             # 3rd Friday of Mar/Jun/Sep/Dec: index futures+options expiry and SPY/QQQ ex-dividend (BK-4)
 SCAN_INTERVAL_SEC     = 60
 MONITOR_INTERVAL_SEC  = 10
 HEARTBEAT_STALE_SEC   = 120            # watchdog kills the daemon past this
@@ -65,7 +68,7 @@ DTE_MIN, DTE_MAX      = 7, 21
 # spread costs a median 52–54% of width — outside KB §5 (25–45%) 90% of the time.
 # Long 2–3 strikes OTM on a 5-wide lands inside the band 60–73% of the time.
 SPREAD_WIDTH_STEPS    = 5              # short leg this many $1 strikes beyond the long
-LONG_OFFSETS          = (2, 3, 1)      # long-leg strikes beyond ceil/floor(spot), tried in order
+LONG_OFFSETS          = (1, 2, 3)      # try the long nearest the money first (Natenberg: when IV is low — our §22 regime — buy the ATM side), fall back OTM to satisfy §5 (BK-1)
 OPT_MIN_OI            = 200            # KB §9
 OPT_MAX_BID_ASK_PCT   = 0.25           # per-leg quote sanity (a cheap OTM short leg is wide in % terms)
 OPT_MAX_SPREAD_COST_PCT = 0.10         # KB §9 applied to the SPREAD: both legs' quote widths ≤ 10% of debit (≈5% one-way)

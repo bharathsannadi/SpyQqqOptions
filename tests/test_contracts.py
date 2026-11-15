@@ -23,7 +23,8 @@ def test_picks_otm_long_and_five_wide_short_passing_all_gates():
     chain = [_c(k, v, round(v + 0.02, 2)) for k, v in px.items()]
     cand = contracts.select(FakeBroker(chain), "SPY", "bull", spot, today)
     assert cand is not None and cand.ok, [g for g in cand.gates if not g["ok"]]
-    assert cand.long.strike == 103 and cand.short.strike == 108 and cand.width == 5
+    # BK-1 (Natenberg): the long nearest the money that still satisfies §5 wins — 102/107 at 28% of width
+    assert cand.long.strike == 102 and cand.short.strike == 107 and cand.width == 5
     assert 0.25 * 5 <= cand.net_debit <= 0.45 * 5
 
 

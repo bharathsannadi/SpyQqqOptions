@@ -64,6 +64,10 @@ Every row names the code that enforces it, so this is a checklist, not a memoir.
 | "Trust but verify" on your own claims — the exit-sweep and S3 results were both retracted after a proper re-test. | Written into `docs/DESIGN.md` § Confidence; the reviewer prompt forbids recommending "trade more". |
 | At $5K real money, friction decides: minimum premium ~$500, 3 PDT day-trades/week. | Not yet relevant (paper, $94K); recorded here so the sizing conversation starts from it when it is. |
 
+## Book re-read 2026-11-15
+
+See `docs/BOOK_LEARNINGS.md`: four rules applied (Natenberg leg choice, 10:05 start, witching blackout, rolling drawdown halt), nine confirmed, five research items.
+
 ## Still open (known, not done)
 
 - VIX rate-of-change gate (TODO #11) — no VIX feed in this bot; HV5 regime via `vol_edge.vol_regime` is the available proxy, not wired as a gate.

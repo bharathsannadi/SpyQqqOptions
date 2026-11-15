@@ -19,7 +19,7 @@ from . import config, contracts, debate, exits, gates, history, report, signal a
 from .broker import Broker
 from .data import MarketData
 from .ledger import Ledger
-from .risk import DayState, recent_slippage_bps, recent_stops
+from .risk import DayState, recent_slippage_bps, recent_stops, recent_net_usd
 from .status import write_status
 
 log = logging.getLogger(__name__)
@@ -199,6 +199,7 @@ class Engine:
             recent_stops(self.ledger, sym, s.direction, config.COOLDOWN_SESSIONS), sym, s.direction)))
         g.append(G("same_direction", gates.same_direction_ok(self.day.open_directions(), s.direction)))
         g.append(G("fill_quality", gates.slippage_ok(recent_slippage_bps(self.ledger, config.SLIPPAGE_WINDOW))))
+        g.append(G("drawdown", gates.drawdown_ok(recent_net_usd(self.ledger, config.ROLLING_LOSS_SESSIONS))))
         s.hv5, s.hv30 = self.md.hv(sym)
         s.iv30 = self.md.iv30(sym, s.price)
         self.md.record_iv(sym, s.iv30)

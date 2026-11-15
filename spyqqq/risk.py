@@ -42,6 +42,16 @@ def recent_stops(ledger, sym: str, direction: str, sessions: int) -> int:
                and "flatten" not in (r.get("reason") or ""))
 
 
+def recent_net_usd(ledger, sessions: int) -> float:
+    """Net realised P&L (after fees) over the last `sessions` trading days with a close, one row per pos_id."""
+    by_id: dict = {}
+    for r in ledger.rows():
+        if r["kind"] == "close" and r.get("exit") is not None:
+            by_id[r.get("pos_id") or r["ts"]] = r
+    days = sorted({r["ts"][:10] for r in by_id.values()})[-sessions:]
+    return sum(float(r.get("pnl_usd") or 0) for r in by_id.values() if r["ts"][:10] in days)
+
+
 @dataclass
 class DayState:
     date: str = field(default_factory=today_str)

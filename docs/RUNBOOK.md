@@ -9,7 +9,7 @@
 2. At 09:35 confirm the four legacy sells (CVNA/INTC/NVDA/PLTR) filled: the old paper
    positions should be gone from the Alpaca paper account.
 3. `make status` → `connected=True`, `status_age` small, history lines for both setups.
-4. Dashboard `http://127.0.0.1:5050`: phase card counts down to the 10:00 scan; SPY/QQQ cards
+4. Dashboard `http://127.0.0.1:5050`: phase card counts down to the 10:05 scan; SPY/QQQ cards
    show the signal banner, confidence bars and the gate pipeline.
 5. After 15:45 read `reports/2026-11-16.md`.
 
@@ -24,7 +24,7 @@
 | When (ET) | What happens | What you do |
 |---|---|---|
 | boot / 09:30 | engine connects, reconciles, recomputes confidence tables | nothing — check `http://127.0.0.1:5050` shows green pills and the countdown |
-| 10:00–11:30 | scans every 60s; ≤3 spreads (2 open), ≤$1,500 debit | watch the SPY/QQQ cards: signal banner, confidence bars, gate chips |
+| 10:05–11:30 | scans every 60s; ≤3 spreads (2 open), ≤$1,500 debit | watch the SPY/QQQ cards: signal banner, confidence bars, gate chips |
 | 11:30–15:45 | observe-only scans keep the cards live; exits run | nothing |
 | until 15:45 | monitors every 10s; ±20%, stall, ratchet | nothing |
 | 15:45 | flattens; writes `reports/YYYY-MM-DD.md` with the Claude review | **read the report**; change at most one constant in `spyqqq/config.py`; restart |

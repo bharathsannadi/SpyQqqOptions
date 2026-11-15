@@ -100,7 +100,20 @@ def event_blackout(d: date) -> tuple[bool, str]:
         return False, f"KB §17 Event Risk: {ds} is a scheduled macro-event day (FOMC/CPI) — no new entries (Cofnas)"
     if config.NFP_BLACKOUT and d.weekday() == 4 and d.day <= 7:
         return False, f"KB §17 Event Risk: {ds} is the first Friday (NFP 08:30 ET) — no new entries (Cofnas)"
+    if config.WITCHING_BLACKOUT and d.weekday() == 4 and 15 <= d.day <= 21 and d.month in (3, 6, 9, 12):
+        return False, (f"KB §17 Event Risk: {ds} is triple witching (index futures/options expiry + SPY/QQQ "
+                       f"ex-dividend) — no new entries (Stock Trader's Almanac)")
     return True, f"KB §17 Event Risk: {ds} has no scheduled macro release"
+
+
+def drawdown_ok(net_recent_usd: float) -> tuple[bool, str]:
+    """KB §RM: a rolling loss of two daily budgets over ten sessions means the edge is not
+    showing up — stop entering and review (Elder's 6%-per-month rule, scaled to the budget)."""
+    if net_recent_usd <= -config.ROLLING_LOSS_HALT_USD:
+        return False, (f"KB §RM Drawdown: net ${net_recent_usd:,.0f} over the last {config.ROLLING_LOSS_SESSIONS} "
+                       f"sessions ≤ −${config.ROLLING_LOSS_HALT_USD:,.0f} — no new entries until reviewed (Elder 6% rule)")
+    return True, (f"KB §RM Drawdown: net ${net_recent_usd:,.0f} over the last {config.ROLLING_LOSS_SESSIONS} "
+                  f"sessions is inside −${config.ROLLING_LOSS_HALT_USD:,.0f}")
 
 
 def slippage_ok(recent_slip_bps: list[float]) -> tuple[bool, str]:

@@ -37,17 +37,18 @@ dashboard shows a red "updated 140s ago" pill.
      direction. EMAs/MACD warm up on the prior session's bars.
    If several fire, the setup with the best historical Wilson lower bound is taken.
 3. Gates, cheapest first, each returning `(ok, KB sentence)`:
-   - `§3 entry_window` (entries from 10:30 on a ≥1% opening gap)
-   - `§17 event_blackout` — FOMC decision days (operator list) and first-Friday NFP
+   - `§3 entry_window` — 10:05–11:30 ET (10:05 so the 10:00 release bar is closed; from 10:30 on a ≥1% opening gap)
+   - `§17 event_blackout` — FOMC decision days (operator list), first-Friday NFP, triple-witching Fridays
    - `§12 confidence` — `history.replay` of the same rule over the cached sessions;
      Wilson 95% lower bound ≥ `MIN_CONFIDENCE` with `n ≥ MIN_HISTORY_N`
    - `§7 cooldown` — 2 stop-outs on this symbol+direction in 5 sessions → skip
    - `§5 same_direction` — SPY and QQQ are one bet; max 1 open per direction
    - `§9 fill_quality` — avg slippage of the last 5 real fills < 300 bps
+   - `§RM drawdown` — net realised over the last 10 sessions > −$3,000 (two daily budgets)
    - `§22 vol_edge` — `0.45·HV5 + 0.35·IV30 + 0.20·HV30 > IV30 + 1pt`; missing IV refuses
    - contract gates from `contracts.select`: `§3 dte`, `§9 liquidity` (OI, two-sided
      quote), `§9 spread_cost` (both legs' quote width ≤ 10% of debit), `§5 spread_ratio`
-     (debit 25–45% of width; long 2–3 OTM on a 5-wide, per the option-cache measurement)
+     (debit 25–45% of width; the long nearest the money that fits the band is preferred — Natenberg's low-IV rule, see BOOK_LEARNINGS BK-1)
    - `§4 day_risk` — `risk.DayState.can_enter`: per-trade cap, daily budget, trade count,
      max open, loss halt, operator HALT file
    - `debate` — bull / bear / judge on Opus 5.5; fails **closed** on any error.
