@@ -98,7 +98,7 @@ def replay(sym: str, daily_closes_by_date: dict[date, Sequence[float]],
         bars = list(intraday[d])
         warmup = list(intraday[days[idx - 1]]) if idx > 0 else []
         trend = sig.daily_trend(daily_closes_by_date.get(d, []))
-        if trend is None and sig.TREND_REQUIRED.get(setup, True):
+        if trend is None and sig.trend_required(setup):
             continue
         fired = False
         for i in range(2, len(bars)):

@@ -109,11 +109,20 @@ SETUPS = ("trend_pullback", "vwap_momentum")
 TREND_REQUIRED = {"trend_pullback": True, "vwap_momentum": False}
 
 
+def trend_required(setup: str) -> bool:
+    if setup == "vwap_momentum":
+        return bool(getattr(config, "VWAP_REQUIRE_TREND", False))
+    return TREND_REQUIRED.get(setup, True)
+
+
 def evaluate(sym: str, trend: Optional[str], bars: Sequence[Bar],
              setup: str = "trend_pullback", warmup: Sequence[Bar] = ()) -> Optional[Signal]:
     """Evaluate one setup on the LAST bar of `bars` (today's closed 5-min bars)."""
     if setup == "vwap_momentum":
-        return evaluate_vwap_momentum(sym, bars, warmup)
+        s = evaluate_vwap_momentum(sym, bars, warmup)
+        if s is not None and getattr(config, "VWAP_REQUIRE_TREND", False) and s.direction != trend:
+            return None                          # only trade momentum WITH the daily trend
+        return s
     return evaluate_trend_pullback(sym, trend, bars)
 
 

@@ -127,7 +127,10 @@ def test_evaluate_all_returns_each_enabled_setup(monkeypatch):
     assert any(x.setup == "trend_pullback" for x in out)
 
 
-def test_replay_setup_param_uses_warmup():
+def test_replay_setup_param_uses_warmup(monkeypatch):
+    monkeypatch.setattr(config, "VWAP_REQUIRE_TREND", False)   # this test pins the trend-agnostic mode
+    from datetime import time as _t
+    monkeypatch.setattr(config, "ENTRY_WINDOW_END_ET", _t(11, 30))   # fixture sized for the original window
     d0, d1 = date(2026, 11, 12), date(2026, 11, 13)
     intraday = {d0: _trend_bars(d0, n=78, start_px=95.0), d1: _trend_bars(d1, n=78, start_px=101.5)}
     for b in intraday[d1]: b.volume = 1200.0
@@ -135,3 +138,14 @@ def test_replay_setup_param_uses_warmup():
     assert hr["bull"].n == 1            # trend-agnostic: fires even with no daily closes
     hr2 = history.replay("SPY", {d0: [], d1: []}, intraday, setup="trend_pullback")
     assert hr2["bull"].n == 0           # trend_pullback needs the daily trend
+
+
+def test_vwap_requires_daily_trend_when_configured(monkeypatch):
+    """2026-11-17: vwap_momentum is only taken WITH the daily trend."""
+    monkeypatch.setattr(config, "VWAP_REQUIRE_TREND", True)
+    d0, d1 = date(2026, 11, 12), date(2026, 11, 13)
+    intraday = {d0: _trend_bars(d0, n=78, start_px=95.0), d1: _trend_bars(d1, n=78, start_px=101.5)}
+    for b in intraday[d1]: b.volume = 1200.0
+    hr = history.replay("SPY", {d0: [], d1: []}, intraday, setup="vwap_momentum")
+    assert hr["bull"].n == 0 and hr["bear"].n == 0      # no daily trend → no vwap trade
+    assert sig.trend_required("vwap_momentum") is True

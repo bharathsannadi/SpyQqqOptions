@@ -45,7 +45,7 @@ EXIT_FLOOR2_LOCK      = 0.10
 
 # ── Session windows (ET) ─────────────────────────────────────────────────────
 ENTRY_WINDOW_START_ET = time(10, 5)    # KB §3: never the first 30 min; 10:05 so the 10:00 ET release bar (ISM/JOLTS/UMich) is closed first (BK-3)
-ENTRY_WINDOW_END_ET   = time(11, 30)
+ENTRY_WINDOW_END_ET   = time(12, 30)   # 11:30→12:30 on 2026-11-17 (operator: "best guess" balance; 2025-26 replay ≈107 trades/yr)
 GAP_DELAY_PCT         = 1.0            # |open gap| ≥ this % → entries start 30 min later (TODO #12 gap-day)
 GAP_DELAY_START_ET    = time(10, 30)
 STALE_QUOTE_CLOSE_SEC = 600            # no two-sided spread quote for this long → close at last mid (a dead
@@ -78,7 +78,8 @@ LIMIT_PAD_FRAC        = 0.25           # pay mid + 25% of the half-spread (marke
 FILL_TIMEOUT_SEC      = 45
 
 # ── Signal ───────────────────────────────────────────────────────────────────
-SETUPS_ENABLED        = ("trend_pullback", "vwap_momentum")   # both are measured; best confidence wins
+SETUPS_ENABLED        = ("vwap_momentum",)   # 2026-11-17: trend_pullback dropped — lost before costs in 3 of 4 sym×dir buckets over 2021-26
+VWAP_REQUIRE_TREND    = True             # 2026-11-17: vwap_momentum only WITH the daily 20d-SMA trend (best out-of-sample variant)
 VWAP_MIN_VOL_RATIO    = 1.0            # vwap_momentum: bar volume vs trailing 20-bar average
 TREND_MA_DAYS         = 20             # daily close vs 20d SMA sets the allowed direction
 PULLBACK_EMA          = 9              # 5-min EMA the pullback must reclaim
@@ -94,7 +95,8 @@ MIN_HISTORY_N         = 10             # past occurrences needed before trading 
 
 # ── Vol gate (KB §22) ────────────────────────────────────────────────────────
 VOL_EDGE_REQUIRED     = True
-MIN_VOL_EDGE_PTS      = 1.0
+MIN_VOL_EDGE_PTS      = -8.0           # 2026-11-17 PAPER best guess (was +1.0): a debit spread SELLS the same rich IV on its
+                                       # short leg, so only refuse when IV is >8 vol pts over forecast (stressed). Untested — no historical IV.
 IV_HISTORY_MIN_DAYS   = 20             # iv_rank only once we've logged this many sessions
 
 # ── LLM gates ────────────────────────────────────────────────────────────────
