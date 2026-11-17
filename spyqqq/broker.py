@@ -153,13 +153,13 @@ class Broker:
         from alpaca.trading.requests import GetOptionContractsRequest
         from alpaca.trading.enums import ContractType as TCT
         from alpaca.data.requests import OptionChainRequest
-        from alpaca.data.enums import ContractType as DCT
+        DCT = TCT  # alpaca-py 0.45: ContractType lives only in alpaca.trading.enums
         out: dict[str, Contract] = {}
         try:
             req = GetOptionContractsRequest(underlying_symbols=[sym],
                                             type=TCT.CALL if opt_type == "call" else TCT.PUT,
                                             expiration_date_gte=exp_lo, expiration_date_lte=exp_hi,
-                                            strike_price_gte=strike_lo, strike_price_lte=strike_hi,
+                                            strike_price_gte=f"{strike_lo:g}", strike_price_lte=f"{strike_hi:g}",
                                             limit=500)
             resp = self.trading.get_option_contracts(req)
             for c in (resp.option_contracts or []):
