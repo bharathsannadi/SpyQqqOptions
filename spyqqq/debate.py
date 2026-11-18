@@ -91,17 +91,17 @@ def run(sig: Signal, extra: Optional[dict] = None) -> dict:
     setup = _setup_text(sig, extra)
     bull = llm.ask(_BULL, f"Setup:\n{setup}\n\nMake the bull case.", config.DEBATE_MODEL, 400)
     if bull is None:
-        return {"proceed": False, "confidence": 0.0, "reason": "bull call failed — gate fails CLOSED",
+        return {"proceed": False, "confidence": 0.0, "reason": f"bull call failed ({llm.last_error}) — gate fails CLOSED",
                 "bull": "", "bear": "", "status": "failed_closed"}
     bear = llm.ask(_BEAR, f"Setup:\n{setup}\n\nMake the bear case.", config.DEBATE_MODEL, 400)
     if bear is None:
-        return {"proceed": False, "confidence": 0.0, "reason": "bear call failed — gate fails CLOSED",
+        return {"proceed": False, "confidence": 0.0, "reason": f"bear call failed ({llm.last_error}) — gate fails CLOSED",
                 "bull": bull, "bear": "", "status": "failed_closed"}
     judge = llm.ask(_JUDGE, f"Setup:\n{setup}\n\nBULL: {bull}\n\nBEAR: {bear}\n\n"
                             f"Proposed direction: {sig.direction.upper()}. Proceed?",
                     config.DEBATE_MODEL, 200)
     if judge is None:
-        return {"proceed": False, "confidence": 0.0, "reason": "judge call failed — gate fails CLOSED",
+        return {"proceed": False, "confidence": 0.0, "reason": f"judge call failed ({llm.last_error}) — gate fails CLOSED",
                 "bull": bull, "bear": bear, "status": "failed_closed"}
     proceed, conf, reason = _parse_judge(judge)
     proceed = proceed and conf >= config.DEBATE_MIN_CONFIDENCE

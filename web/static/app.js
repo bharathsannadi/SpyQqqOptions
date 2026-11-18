@@ -9,14 +9,23 @@ const signed = (v, d = 0) => (v > 0 ? '+' : v < 0 ? '−' : '') + '$' + Math.abs
 const pct = (v, d = 0) => (v > 0 ? '+' : '') + (+v).toFixed(d) + '%';
 const num = (v, d = 2) => v == null ? '—' : (+v).toFixed(d);
 const hhmm = ts => ts ? ts.slice(11, 16) : '—';
-const GATE_LABEL = {entry_window: 'Window', event_blackout: 'Events', confidence: 'Confidence', cooldown: 'Cooldown',
+const GATE_LABEL = {entry_window: 'Window', signal_fresh: 'Fresh', event_blackout: 'Events', confidence: 'Confidence', cooldown: 'Cooldown',
   same_direction: 'Correlation', fill_quality: 'Fill quality', drawdown: 'Drawdown', vol_edge: 'Vol edge', chain: 'Chain', dte: 'DTE',
   liquidity: 'Liquidity', spread_cost: 'Spread cost', spread_ratio: 'Pricing', day_risk: 'Budget', debate: 'Debate'};
-const GATE_ORDER = ['entry_window','event_blackout','confidence','cooldown','same_direction','fill_quality','drawdown','vol_edge','dte','liquidity','spread_cost','spread_ratio','day_risk','debate'];
+const GATE_ORDER = ['entry_window','signal_fresh','event_blackout','confidence','cooldown','same_direction','fill_quality','drawdown','vol_edge','dte','liquidity','spread_cost','spread_ratio','day_risk','debate'];
 const SETUP_LABEL = {trend_pullback: 'Trend pullback', vwap_momentum: 'VWAP momentum'};
+const SHORT = {trend_pullback: 'Pullback', vwap_momentum: 'VWAP mom.'};
 
 let S = null;            // last /api/status
 let SUM = null;          // last /api/summary
+const OPEN = (() => { try { return JSON.parse(localStorage.getItem('open-off') || '{}'); } catch (e) { return {}; } })();
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (d.matches && d.matches('details.offset')) { OPEN[d.dataset.k] = d.open; try { localStorage.setItem('open-off', JSON.stringify(OPEN)); } catch (_) {} }
+}, true);
+const offDetails = (k, label) => `<details class="offset" data-k="${k}" ${OPEN[k] ? 'open' : ''}><summary>${label}</summary><div class="offset-body">`;
+let WHY = {};           // /api/why/<sym> — per-condition checklist when nothing fired
+let EXTRA = null;        // /api/history_extra — confidence for setups the engine isn't trading
 let actFilter = 'all';
 let actDay = null;       // YYYY-MM-DD shown in Activity (null = today ET)
 
@@ -68,6 +77,14 @@ function renderTop() {
   set('#p-conn', S.connected ? `<span class="dot live"></span> connected · ${esc(S.key_prefix)}…` : '<span class="dot"></span> DISCONNECTED', S.connected ? 'ok' : 'bad');
   set('#p-mkt', S.market_open ? '● market open' : '○ market closed', S.market_open ? 'ok' : '');
   $('#p-halt').hidden = !S.halted;
+  const le = S.llm_error || '', pl = $('#p-llm');
+  pl.hidden = !le;
+  if (le) {
+    const gate = S.limits?.debate_enabled;
+    pl.textContent = /credit/i.test(le) ? '🤖 Claude credits out' : '🤖 Claude down';
+    pl.className = 'pill ' + (gate ? 'bad' : 'warn');
+    pl.title = le + (gate ? ' — the debate gate fails closed: no entries until this clears' : ' — debate gate is OFF; only the EOD review is unavailable');
+  }
   set('#p-age', age > 120 ? `⚠ engine silent ${dur(age * 1000)}` : `engine ok · ${age.toFixed(0)}s`, age > 120 ? 'bad' : '');
   const ph = phase();
   $('#phase-eyebrow').textContent = ph.eyebrow;
@@ -99,26 +116,121 @@ function renderTiles() {
   $('#t-halt-sub').textContent = r < 0 ? `${money(dist)} of room before new entries stop` : 'no losses today · full room';
 }
 
+
+// ── "why aren't we buying?" — icons + sliders, words only in tooltips ───────
+const clamp01 = x => Math.max(0, Math.min(1, x));
+// slider: track with threshold tick (or band), fill from threshold to value, dot at value
+function gauge(g, ok) {
+  if (!g) return '<span class="gz"></span>';
+  const pos = v => clamp01((v - g.lo) / (g.hi - g.lo)) * 100;
+  const v = pos(g.v);
+  let mid = '';
+  if (g.want === 'band') {
+    const [a, b] = g.t;
+    mid = `<span class="gz-band" style="left:${pos(a)}%;width:${pos(b) - pos(a)}%"></span>`;
+  } else {
+    const t = pos(g.t);
+    mid = `<span class="gz-fill" style="left:${Math.min(t, v)}%;width:${Math.abs(v - t)}%"></span><span class="gz-tick" style="left:${t}%"></span>`;
+  }
+  const off = g.v < g.lo || g.v > g.hi;
+  return `<span class="gz ${ok ? 'ok' : 'no'}">${mid}<span class="gz-dot ${off ? 'edge' : ''}" style="left:${v}%"></span></span>`;
+}
+const pips = (n, of, cls = '') => `<span class="pips ${cls}" title="${n} of ${of}">${Array.from({length: of}, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
+
+function whyNoSignal(sym, s, L, ph) {
+  const w = WHY[sym]?.live ? WHY[sym] : null;
+  const _e = etParts(), nowHM = String(_e.h).padStart(2, '0') + ':' + String(_e.m).padStart(2, '0');
+  const end = L.entry_end || '12:30', start = L.entry_start || '10:05';
+  const chips = [];
+  if (nowHM > end) chips.push(`<span class="wc no" title="Entry window ${start}–${end} ET is over — no new trades today; open spreads are still managed">⏱ closed ${end}</span>`);
+  else if (nowHM < start) chips.push(`<span class="wc wait" title="Entries start at ${start} ET">⏱ opens ${start}</span>`);
+  else chips.push(`<span class="wc ok" title="Inside the entry window ${start}–${end} ET">⏱ open</span>`);
+  const tr = s.trend;
+  chips.push(!tr || tr === 'flat' ? `<span class="wc" title="Daily trend flat (close within 0.1% of the 20-day SMA) — trend-following setups are off">→ flat</span>`
+    : `<span class="wc ${tr}" title="20-day trend ${tr === 'bull' ? 'up — only calls' : 'down — only puts'}">${tr === 'bull' ? '▲ calls only' : '▼ puts only'}</span>`);
+  if (w) {
+    for (const b of w.setups.filter(x => x.traded)) for (const d of b.directions) {
+      const miss = d.checks.filter(c => !c.ok).map(c => c.label).join(', ');
+      chips.push(`<span class="wc" title="${esc(SETUP_LABEL[b.setup] || b.setup)} on the ${esc(w.bar)} bar: ${d.passed}/${d.total} conditions${miss ? ' — missing ' + esc(miss) : ''}">${esc(SHORT[b.setup] || b.setup)} ${pips(d.passed, d.total, d.passed === d.total ? 'full' : '')}</span>`);
+    }
+    if (w.last_fire) {
+      const lf = w.last_fire, df = w.last_decided_fire, dec = w.last_decision;
+      const gate = dec && !dec.accepted ? (GATE_LABEL[dec.gate] || dec.gate || 'gate') : null;
+      const tip = `Fired ${w.fires_today}× today (${w.fires_in_window} in window), last at ${lf.et}; the engine decided on ${w.decided_today}` +
+        (dec ? ` — latest: ${df.et} bar ${dec.accepted ? 'entered' : `blocked by ${gate}: ${dec.why || ''}`}` : '');
+      chips.push(`<span class="wc" title="${esc(tip)}">⚡ ${w.fires_today}× · ${esc(lf.et)}</span>`);
+      if (dec) chips.push(`<span class="wc ${dec.accepted ? 'ok' : 'no'}" title="${esc(tip)}">${dec.accepted ? '✓ entered' : '✗ ' + esc(gate)} · ${esc(df.et)}</span>`);
+    } else chips.push('<span class="wc" title="The rule has not fired on any closed bar today">⚡ 0×</span>');
+  }
+  return `<span class="wcs">${chips.join('')}</span>`;
+}
+
+function checklist(sym) {
+  const w = WHY[sym]; if (!w || !w.live || !w.setups.length) return '';
+  const one = b => {
+    if (b.blocked) return `<div class="ck off" title="${esc(b.blocked)}"><div class="ck-head"><span>${esc(SHORT[b.setup] || b.setup)}</span><span class="hint">trend flat</span></div></div>`;
+    return b.directions.map(d => `<div class="ck ${b.traded ? '' : 'off'}">
+      <div class="ck-head"><span>${esc(SHORT[b.setup] || b.setup)} <span class="arrow ${d.direction}">${d.direction === 'bull' ? '▲' : '▼'}</span></span>${pips(d.passed, d.total, d.passed === d.total ? 'full' : '')}</div>
+      ${d.checks.map(c => `<div class="gr ${c.ok ? 'ok' : 'no'}" title="${esc(c.tip || c.label)}"><i>${c.ok ? '✓' : '✗'}</i><span class="gl">${esc(c.label)}</span>${gauge(c.g, c.ok)}<b>${esc(c.value)}</b></div>`).join('')}
+    </div>`).join('');
+  };
+  const tr = w.setups.filter(b => b.traded), off = w.setups.filter(b => !b.traded);
+  return `<div class="sect"><div class="eyebrow"><span>Conditions · ${esc(w.bar || '—')}</span></div><div class="cks">${tr.map(one).join('')}</div>${off.length ? offDetails('ck-' + sym, `Not traded (${off.length})`) + `<div class="cks">${off.map(one).join('')}</div></div></details>` : ''}</div>`;
+}
+
+// engine data freshness: newest closed bar the engine scanned vs the scan time.
+// >10 min means it fell back to delayed SIP bars (or slept) — signals would act late.
+function freshChip(s) {
+  if (!s?.ts || !s.bars) return '<span class="meta"></span>';
+  const [h, m] = hhmm(s.ts).split(':').map(Number);
+  const closeMin = 9 * 60 + 30 + s.bars * 5;                       // close of the newest bar, ET minutes
+  const lag = Math.max(0, h * 60 + m - closeMin);
+  const cls = lag > 20 ? 'no' : lag > 10 ? 'wait' : 'ok';
+  const bh = String(Math.floor((closeMin - 5) / 60)).padStart(2, '0') + ':' + String((closeMin - 5) % 60).padStart(2, '0');
+  return `<span class="wc ${cls} meta-chip" title="Engine scanned at ${hhmm(s.ts)} ET; newest closed bar ${bh} (${s.bars} bars). Data lag ${lag} min${lag > 10 ? ' — late data: signals act late' : ''}.">● ${hhmm(s.ts)} · ${lag}m</span>`;
+}
+
 // ── symbol card ──────────────────────────────────────────────────────────────
 function confidenceRows(sym, hist, sig, L) {
-  const setups = L.setups || Object.keys(hist || {});
+  const traded = L.setups || Object.keys(hist || {});
+  const off = (EXTRA?.disabled || []).filter(st => !traded.includes(st));
+  const setups = [...traded, ...off];
   const minC = L.min_confidence ?? 0.35, minN = L.min_history_n ?? 10;
-  let h = '';
+  const p0 = v => v == null ? '—' : (v * 100).toFixed(0) + '%';
+  let h = '', opened = false;
   for (const st of setups) for (const dir of ['bull', 'bear']) {
-    const hr = hist?.[st]?.[dir];
+    const isOff = off.includes(st);
+    if (isOff && !opened) { h += offDetails('conf-' + sym, `Not traded (${off.length})`); opened = true; }
+    const hr = isOff ? EXTRA?.history?.[sym]?.[st]?.[dir] : hist?.[st]?.[dir];
     const active = sig && sig.setup === st && sig.direction === dir;
-    const arrow = dir === 'bull' ? '▲' : '▼';
-    const lab = `<div class="lab ${active ? 'active' : ''}" title="${esc(hr?.label || 'no history')}">${active ? '● ' : ''}${esc(SETUP_LABEL[st] || st)} <span class="arrow ${dir}">${arrow}</span></div>`;
-    if (!hr || hr.n == null) { h += lab + `<div class="track"></div><div class="val">no history</div>`; continue; }
+    const name = `${esc(SHORT[st] || st)} <span class="arrow ${dir}">${dir === 'bull' ? '▲' : '▼'}</span>`;
+    if (!hr || hr.n == null) {
+      h += `<div class="cr ${isOff ? 'off' : ''}"><span class="lab">${name}</span><span class="track"></span><span class="hint">${isOff && !EXTRA?.ready ? '…' : '—'}</span></div>`;
+      continue;
+    }
     const lo = (hr.lower95 ?? 0) * 100, hi = (hr.upper95 ?? 0) * 100, rate = (hr.rate ?? 0) * 100;
-    const weak = hr.n < minN || (hr.lower95 ?? 0) < minC;
-    h += lab + `<div class="track" title="${esc(hr.label)}">
-      <span class="mark floor" style="left:${minC * 100}%" title="floor ${(minC * 100).toFixed(0)}%"></span>
-      <span class="mark half" style="left:50%" title="coin flip"></span>
-      <span class="range ${dir} ${weak ? 'weak' : ''}" style="left:${lo}%;width:${Math.max(1, hi - lo)}%"></span>
-      <span class="pt" style="left:${rate}%"></span></div>
-      <div class="val"><b>${rate.toFixed(0)}%</b> · n=${hr.n}${hr.n < minN ? ' ⚠' : ''}</div>`;
+    const enoughN = hr.n >= minN, pass = enoughN && (hr.lower95 ?? 0) >= minC;
+    const unproven = (hr.lower95 ?? 0) < 0.5;
+    const mv = hr.avg_move_pct;
+    const tip = `${SETUP_LABEL[st] || st} ${dir === 'bull' ? 'calls' : 'puts'}${isOff ? ' (not traded)' : ''}
+Hit rate ${rate.toFixed(1)}% — ${hr.hits}/${hr.n} past fires reached +0.30% first
+95% range ${p0(hr.lower95)}–${p0(hr.upper95)}${unproven ? ' (includes 50%: edge not proven)' : ''}
+Gate: ${p0(hr.lower95)} vs ${(minC * 100).toFixed(0)}% floor → ${pass ? 'pass' : 'fail'}${enoughN ? '' : ` (n < ${minN})`}
+Avg move ${mv == null ? '—' : (mv >= 0 ? '+' : '') + mv.toFixed(3) + '%'}`;
+    h += `<div class="cr ${active ? 'active' : ''} ${isOff ? 'off' : ''}" title="${esc(tip)}">
+      <span class="lab">${active ? '● ' : ''}${name}</span>
+      <span class="track">
+        <span class="mark floor" style="left:${minC * 100}%"></span>
+        <span class="mark half" style="left:50%"></span>
+        <span class="range ${dir} ${pass ? '' : 'weak'}" style="left:${lo}%;width:${Math.max(1, hi - lo)}%"></span>
+        <span class="pt" style="left:${rate}%"></span></span>
+      <b class="rate">${rate.toFixed(0)}%</b>
+      <span class="cn">${hr.n}</span>
+      <span class="mv ${(mv ?? 0) >= 0 ? 'up' : 'down'}">${mv == null ? '—' : (mv >= 0 ? '+' : '') + mv.toFixed(2) + '%'}</span>
+      <span class="ic ${pass ? 'ok' : 'no'}">${pass ? '✓' : '✗'}${unproven ? '<sup>⚠</sup>' : ''}</span>
+    </div>`;
   }
+  if (opened) h += '</div></details>';
   return h;
 }
 
@@ -139,7 +251,7 @@ function symCard(sym) {
     if (stale) why = `Last scan ${s.ts.slice(0, 10)} ${hhmm(s.ts)} ET. ` + why;
   } else if (!sig) {
     big = 'No signal'; badge = '';
-    why = s.trend === 'flat' || !s.trend ? 'Daily trend is flat (price within 0.1% of the 20-day SMA), so trend pullback is off; VWAP momentum has not fired.' : `Trend is ${s.trend}, but no setup has fired on the latest closed 5-min bar.`;
+    why = whyNoSignal(sym, s, L, ph);
   } else {
     const isBull = sig.direction === 'bull';
     sigCls = sig.direction;
@@ -181,14 +293,16 @@ function symCard(sym) {
 
   el.innerHTML = `
     <div class="sym-head"><span class="ticker">${sym}</span><span class="price">${s?.price != null ? num(s.price) : '—'}</span>${trendChip}${gapChip}
-      <span class="meta">${s?.ts ? `scanned ${hhmm(s.ts)} ET · ${s.bars ?? 0} bars` : ''}</span></div>
+      ${freshChip(s)}</div>
     <div class="signal ${sigCls}"><div class="big">${big} ${badge} ${strength}</div><div class="why">${why}${esc(alsoTxt)}</div></div>
+    ${!sig && s && !stale ? checklist(sym) : ''}
     <div class="ind">
       <span><span class="k">VWAP</span><b>${num(ind.vwap)}</b> <span class="${s?.price != null && ind.vwap != null ? (s.price >= ind.vwap ? 'up' : 'down') : ''}">${s?.price != null && ind.vwap != null ? pct((s.price - ind.vwap) / ind.vwap * 100, 2) : ''}</span></span>
       <span><span class="k">EMA9</span><b>${num(ind.ema9)}</b></span>
       <span><span class="k">RSI14</span><b>${rsi != null ? num(rsi, 1) : '—'}</b>${rsiPos != null ? `<span class="rsi" title="no-chase band 40–65"><i style="left:${rsiPos}%"></i></span>` : ''}</span>
     </div>
-    <div class="sect"><div class="eyebrow"><span>Historical confidence <span class="i" title="Bar = 95% interval of the hit rate when this rule fired on past sessions (first touch of ±0.30% before 15:45). Dot = hit rate. The gate uses the bar's left edge. Not a win probability for the spread.">ⓘ</span></span><span>floor ${((L.min_confidence ?? 0.35) * 100).toFixed(0)}% · ▮ 50%</span></div>
+    <div class="sect"><div class="eyebrow"><span title="Bar = 95% range of the hit rate when this rule fired on past sessions (first touch of ±0.30% before 15:45). Dot = hit rate. The gate uses the bar's left edge. Not a win probability for the spread. Hover a row for details.">Confidence ⓘ</span><span class="cf-key" title="amber = gate floor ${((L.min_confidence ?? 0.35) * 100).toFixed(0)}% · grey = 50% coin flip · dot = hit rate"><i class="sw floor"></i>${((L.min_confidence ?? 0.35) * 100).toFixed(0)} <i class="sw half"></i>50 <i class="sw dot"></i></span></div>
+      <div class="cr cr-head"><span></span><span></span><span title="hit rate">hit</span><span title="past fires (sample size)">n</span><span title="average underlying move in the signal's direction">move</span><span title="confidence gate">gate</span></div>
       <div class="conf">${confidenceRows(sym, hist, sig, L)}</div></div>
     ${sig && !s.observe ? `<div class="sect"><div class="eyebrow">Gate pipeline</div>${gatesHtml}</div>` : ''}
     ${cand}${debate}`;
@@ -367,6 +481,18 @@ async function refreshStatus() {
   try { const r = await fetch('/api/status', {cache: 'no-store'}); S = r.ok ? await r.json() : null; } catch (e) { S = null; }
   renderTop(); renderTiles(); for (const sym of (S?.limits?.underlyings || ['SPY', 'QQQ'])) symCard(sym); renderOpen(); renderRules();
 }
+async function refreshWhy() {
+  const syms = S?.limits?.underlyings || ['SPY', 'QQQ'];
+  await Promise.all(syms.map(async sym => {
+    try { const r = await fetch('/api/why/' + sym, {cache: 'no-store'}); if (r.ok) WHY[sym] = await r.json(); } catch (e) {}
+  }));
+  if (S) for (const sym of syms) symCard(sym);
+}
+async function refreshExtra() {
+  try { const r = await fetch('/api/history_extra', {cache: 'no-store'}); if (r.ok) EXTRA = await r.json(); } catch (e) {}
+  if (EXTRA && !EXTRA.ready) setTimeout(refreshExtra, 5000);     // first call kicks off a ~5 s background replay
+  if (S) { for (const sym of (S.limits?.underlyings || ['SPY', 'QQQ'])) symCard(sym); }
+}
 async function refreshLedger() {
   try { const r = await fetch('/api/summary', {cache: 'no-store'}); SUM = r.ok ? await r.json() : null; } catch (e) { SUM = null; }
   renderPerf(); renderActivity();
@@ -380,6 +506,11 @@ try { root.dataset.theme = localStorage.getItem('theme') === 'light' ? 'light' :
 $('#theme').addEventListener('click', () => { root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {} });
 
 refreshStatus(); refreshLedger(); loadReports();
-setInterval(refreshStatus, 15000); setInterval(refreshLedger, 30000); setInterval(loadReports, 300000);
+refreshExtra(); setInterval(refreshExtra, 600000);
+refreshWhy(); setInterval(() => { if (!document.hidden) refreshWhy(); }, 30000);
+// background tabs don't poll (several open dashboards multiplied the load); catch up on return
+const live = fn => () => { if (!document.hidden) fn(); };
+setInterval(live(refreshStatus), 15000); setInterval(live(refreshLedger), 30000); setInterval(live(loadReports), 300000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refreshStatus(); refreshLedger(); refreshWhy(); } });
 setInterval(() => { if (S) renderTop(); }, 1000);   // live countdown + heartbeat age
 })();

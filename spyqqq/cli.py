@@ -1,6 +1,7 @@
 """cli.py — `spyqqq <command>`.
 
-run [--dry]   start the engine (what launchd runs)
+run [--dry]   start the engine (what launchd runs); one per STATE_DIR — to dry-run beside
+              the live engine set SPYQQQ_STATE_DIR to a scratch dir
 status        one-screen state from state/status.json
 positions     open spreads
 halt / resume touch / remove state/HALT (no new entries; exits keep running)
@@ -25,15 +26,65 @@ from . import config
 load_dotenv(config.ROOT / ".env")
 
 
+class _ETFormatter(logging.Formatter):
+    """Log timestamps in US/Eastern with the offset — the ledger, reports and dashboard
+    are all ET, and a host-local (CST) clock made cross-referencing incidents error-prone."""
+    def formatTime(self, record, datefmt=None):
+        from datetime import datetime
+        import pytz
+        return datetime.fromtimestamp(record.created, pytz.timezone("America/New_York")).strftime("%Y-%m-%d %H:%M:%S%z")
+
+
 def _logging(name: str) -> None:
-    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    # pid on every line: two processes writing one log (an overlapping restart, a manual
+    # `run --dry`) were indistinguishable before.
+    fmt = _ETFormatter("%(asctime)s %(levelname)-7s pid=%(process)d %(name)s %(message)s")
     root = logging.getLogger()
     root.setLevel(logging.INFO)
-    sh = logging.StreamHandler(sys.stdout); sh.setFormatter(fmt); root.addHandler(sh)
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    if sys.stdout.isatty():                # under launchd stdout is a file → it would duplicate every line, unrotated
+        sh = logging.StreamHandler(sys.stdout); sh.setFormatter(fmt); root.addHandler(sh)
     fh = RotatingFileHandler(config.LOG_DIR / f"{name}.log", maxBytes=5_000_000, backupCount=5)
     fh.setFormatter(fmt); root.addHandler(fh)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    for noisy in ("httpx", "urllib3", "werkzeug"):   # werkzeug = one line per dashboard poll
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
+_LOCK_FH = None
+
+
+def _single_instance(name: str) -> None:
+    """Exit if another `spyqqq run` holds the lock. Two engines on one account can each
+    pass the open-position caps and double the exposure. flock is released by the OS when
+    the process dies, so a crash never leaves a stale lock."""
+    import fcntl, os
+    global _LOCK_FH
+    path = config.STATE_DIR / f"{name}.lock"
+    _LOCK_FH = open(path, "a+")
+    try:
+        fcntl.flock(_LOCK_FH, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        _LOCK_FH.seek(0)
+        other = _LOCK_FH.read().strip() or "?"
+        logging.getLogger("spyqqq.cli").error(f"[cli] another {name} is running (pid {other}) — exiting")
+        sys.exit(3)
+    _LOCK_FH.seek(0); _LOCK_FH.truncate(); _LOCK_FH.write(str(os.getpid())); _LOCK_FH.flush()
+
+
+def _keep_awake() -> None:
+    """Hold an idle-sleep assertion for exactly as long as this process lives (caffeinate -w).
+    Without it the Mac idle-slept through market hours and the engine only ran during
+    ~20-min DarkWakes — missing the open and leaving open spreads unmanaged (2026-11-17)."""
+    import os, shutil, subprocess
+    if sys.platform != "darwin" or not shutil.which("caffeinate"):
+        return
+    try:
+        subprocess.Popen(["caffeinate", "-i", "-s", "-w", str(os.getpid())],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        logging.getLogger("spyqqq.cli").info("[cli] caffeinate -i -s held for the engine's lifetime")
+    except Exception as e:
+        logging.getLogger("spyqqq.cli").warning(f"[cli] could not start caffeinate: {e}")
 
 
 def _status() -> dict:
@@ -43,7 +94,14 @@ def _status() -> dict:
 
 
 def cmd_run(a):
-    _logging("engine")
+    _logging("engine-dry" if a.dry else "engine")   # a manual dry run must not interleave with the live log
+    # ONE lock for live and dry: both write the same heartbeat, status, ledger and day_state
+    # (budget / trade counts / open directions) — a dry engine beside the live one would
+    # corrupt its risk caps and mask a hung engine from the watchdog. The lock lives in
+    # STATE_DIR, so `SPYQQQ_STATE_DIR=/tmp/x spyqqq run --dry` is the way to test alongside.
+    _single_instance("engine")
+    if not a.dry:
+        _keep_awake()
     from .engine import Engine
     Engine(dry_run=a.dry).run()
 
@@ -95,9 +153,14 @@ def cmd_report(a):
     from .ledger import Ledger
     from . import report
     from .risk import DayState
-    day = a.date or DayState().date
-    path = report.write(day, Ledger(), account=_status().get("account"),
-                        hit_rates=_status().get("history") or None, day=DayState.load())
+    today = DayState().date
+    day = a.date or today
+    # equity / budget / confidence in status.json are *today's* — stamping them on a past
+    # day's report would misstate it; regenerated past reports show "—" for those instead
+    live = day == today
+    path = report.write(day, Ledger(), account=_status().get("account") if live else None,
+                        hit_rates=(_status().get("history") or None) if live else None,
+                        day=DayState.load() if live else None)
     print(Path(path).read_text())
 
 
@@ -112,6 +175,7 @@ def cmd_history(a):
 
 
 def cmd_web(a):
+    _logging("web-app")      # app warnings (chart data fetch etc.); launchd's web.log keeps crashes only
     from .web import app
     app.run(host="127.0.0.1", port=a.port, debug=False)
 

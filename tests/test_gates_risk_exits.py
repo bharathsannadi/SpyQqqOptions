@@ -22,6 +22,14 @@ def test_entry_window_text_names_the_section():
     assert not gates.entry_window(_at(13, 0))[0]
 
 
+def test_signal_fresh_refuses_late_bars():
+    bar = _at(10, 40)                                   # bar 10:40–10:45
+    ok, why = gates.signal_fresh(_at(10, 46), bar); assert ok and "1 min" in why
+    assert gates.signal_fresh(_at(10, 55), bar)[0]      # exactly 10 min after the close: still ok
+    ok, why = gates.signal_fresh(_at(11, 7), bar)       # the 2026-11-17 SPY case: 22 min late
+    assert not ok and "22 min" in why
+
+
 def test_vol_edge_gate_fails_closed_on_missing_iv():
     ok, why = gates.vol_edge_gate(12.0, 14.0, None)
     assert not ok and "§22" in why and "incomplete" in why

@@ -59,6 +59,7 @@ class Engine:
         self.account = self.broker.account() or {}
         self.reconcile()
         self.refresh_history()
+        self.probe_llm()
         self.ledger.engine("ready", equity=self.account.get("equity"), open=len(self.open))
         while not self._stop:
             try:
@@ -83,8 +84,30 @@ class Engine:
         if _time.time() - ts < 30:
             return c
         c = self.broker.clock()
+        if c is None:
+            c = self._clock_fallback()
+        else:
+            self._last_good_clock = c
         self._clock_cache = (_time.time(), c)
         return c
+
+    def _clock_fallback(self) -> Optional[dict]:
+        """A failed clock call used to read as "market closed" — skipping exits and
+        flatten for open spreads. Infer the session from the last good clock instead."""
+        c = getattr(self, "_last_good_clock", None)
+        if not c:
+            return None
+        now = datetime.now(ET)
+        nxt_open, nxt_close = c.get("next_open"), c.get("next_close")
+        try:
+            if c["is_open"]:
+                is_open = nxt_close is None or now < nxt_close
+            else:
+                is_open = nxt_open is not None and nxt_open <= now < (nxt_close or nxt_open)
+        except TypeError:
+            return None
+        log.warning(f"[engine] clock unavailable — using last good clock (open={is_open})")
+        return dict(c, is_open=is_open)
 
     # ── one iteration ────────────────────────────────────────────────────────
     def tick(self) -> None:
@@ -108,6 +131,9 @@ class Engine:
             if self._reported_for != self.day.date and now.time() >= config.FLATTEN_AT_ET:
                 self.write_report()
 
+        if not market_open:
+            self.catch_up_report(now)
+
         if market_open and t - self._last_scan >= config.SCAN_INTERVAL_SEC:
             self._last_scan = t
             in_window = gates.entry_window(now)[0]
@@ -115,6 +141,12 @@ class Engine:
                 # outside the window the scan is observe-only: the dashboard keeps showing
                 # price / trend / signal, but nothing is gated, logged or ordered
                 self.scan(sym, now, observe=not in_window)
+
+        # while Claude is failing, re-check every 30 min so a credit top-up clears the
+        # dashboard pill (and re-opens the debate gate) without an engine restart
+        from . import llm
+        if llm.last_error and t - getattr(self, "_last_probe", 0) >= 1800:
+            self.probe_llm()
 
         if t - getattr(self, "_last_status", 0) >= 5:
             self._last_status = t
@@ -134,8 +166,16 @@ class Engine:
             self.hit_rates = {}
             self.last_signal = {}
             self.refresh_history()
+            self.probe_llm()
 
     # ── history / confidence ─────────────────────────────────────────────────
+    def probe_llm(self) -> None:
+        self._last_probe = _time.time()
+        from . import llm
+        err = llm.probe(config.DEBATE_MODEL if config.DEBATE_ENABLED else config.REVIEW_MODEL)
+        use = "debate gate + EOD review" if config.DEBATE_ENABLED else "EOD review (debate gate is OFF)"
+        log.info(f"[engine] Claude for {use}: {'reachable' if not err else 'NOT reachable — ' + err}")
+
     def refresh_history(self) -> None:
         for sym in config.UNDERLYINGS:
             try:
@@ -156,18 +196,19 @@ class Engine:
         warmup = self.md.prev_session_bars(sym)
         gap = None
         if bars and len(daily_closes) >= 2:
-            prev_close = daily_closes[-2] if daily_closes[-1] == bars[-1].close else daily_closes[-1]
+            prev_close = daily_closes[-1]           # daily_closes = completed sessions only
             gap = (bars[0].open - prev_close) / prev_close * 100.0
         snap = {"ts": now.isoformat(timespec="seconds"), "trend": trend, "bars": len(bars),
                 "price": bars[-1].close if bars else None, "gap_pct": None if gap is None else round(gap, 2),
                 "signal": None, "gates": [], "confidence": None, "candidate": None, "debate": None,
                 "accepted": False, "observe": observe}
         if bars:
-            closes = [b.close for b in bars]
+            closes = [b.close for b in list(warmup) + list(bars)]   # warm up across the open
             e = sig.ema_series(closes, config.PULLBACK_EMA)[-1]
             vw = sig.vwap_series(bars)[-1]
+            r = sig.rsi(closes, config.RSI_LEN)
             snap["indicators"] = {"ema9": round(e, 2) if e else None,
-                                  "rsi14": round(sig.rsi(closes, config.RSI_LEN) or 0, 1),
+                                  "rsi14": round(r, 1) if r is not None else None,
                                   "vwap": round(vw, 2)}
         hr_all = self.hit_rates.get(sym, {})
         snap["history"] = {st: {d: h.as_dict() for d, h in by_dir.items()} for st, by_dir in hr_all.items()}
@@ -191,6 +232,7 @@ class Engine:
             self.last_signal[sym] = snap
             return
         g: list[dict] = [G("entry_window", gates.entry_window(now, gap)),
+                         G("signal_fresh", gates.signal_fresh(now, s.ts)),
                          G("event_blackout", gates.event_blackout(now.date()))]
         hr = hr_all.get(s.setup, {}).get(s.direction)
         snap["confidence"] = hr.as_dict() if hr else None
@@ -393,6 +435,23 @@ class Engine:
                                    "occ": occ, "qty": p["qty"], "closed": ok, "when": "mid-session"})
 
     # ── report ───────────────────────────────────────────────────────────────
+    def catch_up_report(self, now: datetime) -> None:
+        """The EOD report used to be written only by a tick inside 15:45–16:00 — an engine
+        asleep or restarting then (2026-11-16) left the day with no report at all. After the
+        close, write it once if today was a session (SPY has a daily bar dated today)."""
+        today = now.strftime("%Y-%m-%d")
+        if self._reported_for == today or now.time() < config.REPORT_CATCHUP_AFTER_ET:
+            return
+        if (config.REPORT_DIR / f"{today}.md").exists():
+            self._reported_for = today; return
+        bars = self.broker.daily_bars("SPY", days=3)
+        if not bars:
+            return                       # data down — retry next tick (cheap: off-hours cadence 15s)
+        self._reported_for = today       # decided either way: no repeat calls
+        if bars[-1]["ts"].astimezone(ET).strftime("%Y-%m-%d") == today and self.day.date == today:
+            log.info("[engine] no EOD report written in the 15:45–16:00 window — writing it now")
+            self.write_report()
+
     def write_report(self) -> None:
         self._reported_for = self.day.date
         try:

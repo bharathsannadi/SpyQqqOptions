@@ -93,6 +93,48 @@ def rolling(ledger: Ledger, days: int = 20) -> dict:
             "fees": sum(r.get("fees_usd", 0) or 0 for r in closes)}
 
 
+_PMSET = None
+
+
+def host_sleep(day_str: str, pmset_text: Optional[str] = None) -> Optional[tuple[float, int]]:
+    """(minutes asleep, sleeps) inside 09:30–16:00 ET on `day_str`, from macOS's power log.
+    A sleeping host freezes the engine — no scans, no exits — and on 2026-11-16/17 the
+    report read that as "zero signals fired". None when the log isn't available."""
+    import re, subprocess, sys
+    from datetime import datetime, timedelta
+    import pytz
+    if pmset_text is None:
+        if sys.platform != "darwin":
+            return None
+        try:
+            pmset_text = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True, timeout=20).stdout
+        except Exception:
+            return None
+    et = pytz.timezone("America/New_York")
+    d = datetime.strptime(day_str, "%Y-%m-%d")
+    lo, hi = et.localize(d.replace(hour=9, minute=30)), et.localize(d.replace(hour=16))
+    # event column is padded with spaces — this skips "Wake Requests" lines
+    pat = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}) (Sleep|Wake|DarkWake)\s{2,}")
+    asleep, n, t0 = 0.0, 0, None
+    for line in pmset_text.splitlines():
+        m = pat.match(line)
+        if not m:
+            continue
+        t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S %z")
+        if t > hi + timedelta(hours=1):
+            break
+        if m.group(2) == "Sleep":
+            t0 = t
+        elif t0 is not None:
+            a, b = max(t0, lo), min(t, hi)
+            if b > a:
+                asleep += (b - a).total_seconds() / 60; n += 1
+            t0 = None
+    if t0 is not None and t0 < hi:
+        asleep += (hi - max(t0, lo)).total_seconds() / 60; n += 1
+    return round(asleep, 1), n
+
+
 def render(day: str, ledger: Ledger, account: Optional[dict] = None,
            hit_rates: Optional[dict] = None, day_state=None) -> tuple[str, str]:
     s = summarize(day, ledger)
@@ -103,16 +145,29 @@ def render(day: str, ledger: Ledger, account: Optional[dict] = None,
              f"**Budget used:** {_money(day_state.debit_spent_usd) if day_state else '—'} / {_money(config.DAILY_BUDGET_USD)}")
     L.append("")
     L.append("## What the engine did")
-    boots = [e for e in s["engine"] if e.get("event") in ("boot", "ready")]
+    boots = [e for e in s["engine"] if e.get("event") == "boot"]          # "ready" follows every boot — don't double count
     errs = [e for e in s["engine"] if e.get("event") == "tick_error"]
+    session_boots = [e for e in boots if "09:30" <= str(e.get("ts", ""))[11:16] <= "16:00"]
     L.append(f"- engine events: {len(s['engine'])} (boots {len(boots)}, tick errors {len(errs)})")
     L.append(f"- decisions evaluated: {s['decisions']} (accepted {s['accepted']}) — "
              f"signals by symbol: {', '.join(f'{k} {v}' for k, v in s['signals_seen']) or 'none'}")
     L.append(f"- fills: {s['fills']}  ·  closes: {len(s['closes'])}")
+    slept = host_sleep(day)
+    if slept and slept[0] >= 5:
+        L.append(f"- ⚠ **Host slept {slept[0]:.0f} of 390 session minutes** ({slept[1]} sleeps) — the engine was frozen "
+                 "while asleep: no scans, no exit management.")
+    partial = len(session_boots) >= 3 or errs or (slept is not None and slept[0] >= 5)
+    if partial and not (slept and slept[0] >= 5):
+        L.append(f"- ⚠ **Partial coverage:** {len(session_boots)} restarts during market hours, {len(errs)} tick errors. "
+                 "Stale-heartbeat kills in logs/watchdog.log mean the host slept; the engine only scanned between them.")
     if s["decisions"] == 0:
-        L.append("- **Zero signals fired.** Either no pullback-reclaim set up inside "
-                 f"{config.ENTRY_WINDOW_START_ET:%H:%M}–{config.ENTRY_WINDOW_END_ET:%H:%M} ET, or the daily "
-                 "trend filter was flat (close within 0.1% of the 20d SMA).")
+        setups = ", ".join(config.SETUPS_ENABLED)
+        if partial:
+            L.append("- **Zero decisions — not evidence of no setups:** the engine was not scanning continuously (above).")
+        else:
+            L.append(f"- **Zero signals fired.** No enabled setup ({setups}) triggered inside "
+                     f"{config.ENTRY_WINDOW_START_ET:%H:%M}–{config.ENTRY_WINDOW_END_ET:%H:%M} ET"
+                     + (" in the direction of the daily 20d trend." if getattr(config, "VWAP_REQUIRE_TREND", False) else "."))
     L.append("")
     L.append("## Why trades were refused (first failing gate)")
     if s["rej_by_sec"]:
@@ -167,7 +222,7 @@ def render(day: str, ledger: Ledger, account: Optional[dict] = None,
     body = "\n".join(L)
     review = llm.ask(_REVIEW_SYSTEM, body, config.REVIEW_MODEL, max_tokens=600, effort="high")
     L.append("## Review")
-    L.append(review or "_review unavailable (no ANTHROPIC_API_KEY or call failed)_")
+    L.append(review or f"_review unavailable — {llm.last_error or 'call failed'}_")
     L.append("")
     return "\n".join(L), review or ""
 

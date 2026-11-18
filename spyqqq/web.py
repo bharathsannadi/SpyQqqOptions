@@ -36,7 +36,9 @@ def api_status():
 @app.get("/api/ledger")
 def api_ledger():
     day = request.args.get("day") or datetime.now().strftime("%Y-%m-%d")
-    rows = list(Ledger().rows(day))
+    # sort by timestamp: rows are appended in write order, which can differ from event
+    # order when two processes overlap (e.g. a restart racing the old engine's shutdown)
+    rows = sorted(Ledger().rows(day), key=lambda r: r.get("ts", ""))
     return jsonify(rows[-200:])
 
 
@@ -86,3 +88,33 @@ def api_config():
     keys = [k for k in dir(config) if k.isupper() and not k.endswith(("_PATH", "_DIR"))]
     return app.response_class(json.dumps({k: getattr(config, k) for k in keys}, default=str),
                               mimetype="application/json")
+
+
+@app.get("/api/chart/<sym>")
+def api_chart(sym):
+    from . import chart
+    try:
+        return jsonify(chart.build(sym, request.args.get("day")))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.get("/api/chart/<sym>/days")
+def api_chart_days(sym):
+    from . import chart
+    return jsonify(chart.sessions(sym.upper())[:250])
+
+
+@app.get("/api/history_extra")
+def api_history_extra():
+    from . import chart
+    return jsonify(chart.history_extra())
+
+
+@app.get("/api/why/<sym>")
+def api_why(sym):
+    from . import chart
+    try:
+        return jsonify(chart.diagnose(sym))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400

@@ -13,14 +13,16 @@ def client(tmp_path, monkeypatch):
     state, reports = tmp_path / "state", tmp_path / "reports"
     monkeypatch.setenv("SPYQQQ_STATE_DIR", str(state))
     monkeypatch.setenv("SPYQQQ_REPORT_DIR", str(reports))
-    for m in ("spyqqq.web", "spyqqq.report", "spyqqq.ledger", "spyqqq.config"):
+    import spyqqq
+    for m in ("spyqqq.web", "spyqqq.report", "spyqqq.ledger", "spyqqq.chart", "spyqqq.config"):
         sys.modules.pop(m, None)
+        spyqqq.__dict__.pop(m.split(".")[1], None)   # `from . import chart` reads the package attribute first
     import spyqqq.config as config
     assert config.STATE_DIR == state and config.REPORT_DIR == reports
     web = importlib.import_module("spyqqq.web")
     web.app.testing = True
     yield web.app.test_client(), config
-    for m in ("spyqqq.web", "spyqqq.report", "spyqqq.ledger", "spyqqq.config"):
+    for m in ("spyqqq.web", "spyqqq.report", "spyqqq.ledger", "spyqqq.chart", "spyqqq.config"):
         sys.modules.pop(m, None)
     monkeypatch.delenv("SPYQQQ_STATE_DIR"); monkeypatch.delenv("SPYQQQ_REPORT_DIR")
     importlib.import_module("spyqqq.config")       # restore the real paths for later tests
@@ -87,5 +89,97 @@ def test_config_endpoint_has_no_paths(client):
 @pytest.mark.skipif(not any(os.access(os.path.join(p, "node"), os.X_OK) for p in os.environ.get("PATH", "").split(os.pathsep)), reason="node not installed")
 def test_dashboard_js_parses():
     import subprocess
-    js = Path(__file__).resolve().parent.parent / "web" / "static" / "app.js"
-    assert subprocess.run(["node", "--check", str(js)], capture_output=True).returncode == 0
+    static = Path(__file__).resolve().parent.parent / "web" / "static"
+    for name in ("app.js", "chart.js"):
+        assert subprocess.run(["node", "--check", str(static / name)], capture_output=True).returncode == 0, name
+
+
+# ── chart / why endpoints ────────────────────────────────────────────────────
+def _write_bars(config, sym, days):
+    """`days` sessions of flat-ish 5-min bars ending yesterday, plus daily closes."""
+    from datetime import datetime, timedelta
+    import pytz
+    et = pytz.timezone("America/New_York")
+    config.BARS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    today = datetime.now(et).date()
+    sessions, d = [], today - timedelta(days=1)
+    while len(sessions) < days:
+        if d.weekday() < 5:
+            sessions.append(d)
+        d -= timedelta(days=1)
+    sessions.reverse()
+    with (config.BARS_CACHE_DIR / f"{sym}_5m.jsonl").open("w") as f:
+        for k, day in enumerate(sessions):
+            t0 = et.localize(datetime(day.year, day.month, day.day, 9, 30))
+            for i in range(78):
+                px = 500 + k + i * 0.01
+                f.write(json.dumps({"ts": (t0 + timedelta(minutes=5 * i)).isoformat(), "open": px, "high": px + .05,
+                                    "low": px - .05, "close": px + .02, "volume": 1e6}) + "\n")
+    with (config.BARS_CACHE_DIR / f"{sym}_1d.jsonl").open("w") as f:
+        for k in range(30):
+            f.write(json.dumps({"ts": (today - timedelta(days=60 - k)).isoformat(), "open": 1, "high": 1, "low": 1,
+                                "close": 400 + k, "volume": 1}) + "\n")
+    return sessions
+
+
+def test_chart_past_session_and_validation(client):
+    c, config = client
+    sessions = _write_bars(config, "SPY", 3)
+    r = c.get(f"/api/chart/SPY?day={sessions[-1].isoformat()}")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["source"] == "cache" and len(d["bars"]) == 78 and d["trend"] == "bull"
+    assert d["window"]["start"] < d["window"]["end"]
+    assert all({"traded", "provisional", "in_window"} <= set(s) for s in d["signals"])
+    assert c.get("/api/chart/AAPL").status_code == 400                      # only the traded underlyings
+    assert c.get("/api/chart/SPY?day=not-a-date").status_code == 400
+    days = c.get("/api/chart/SPY/days").get_json()
+    assert days[0] >= sessions[-1].isoformat() and sessions[0].isoformat() in days
+
+
+def test_chart_today_falls_back_when_no_live_bars(client, monkeypatch):
+    from datetime import datetime
+    import pytz
+    c, config = client
+    sessions = _write_bars(config, "SPY", 3)
+    import spyqqq.chart as chart
+    monkeypatch.setattr(chart, "_today_bars", lambda sym: [])
+    d = c.get("/api/chart/SPY").get_json()
+    now = datetime.now(pytz.timezone("America/New_York"))
+    if now.weekday() >= 5 or now.strftime("%H:%M") >= "09:45":
+        assert d["fallback"] is True and d["day"] == sessions[-1].isoformat() and len(d["bars"]) == 78
+    else:
+        assert d["fallback"] is False and d["bars"] == []
+    w = c.get("/api/why/SPY").get_json()
+    assert w["sym"] == "SPY" and (w["live"] is False or w["bar"] is None)
+
+
+def test_why_lists_every_condition_for_live_bars(client, monkeypatch):
+    c, config = client
+    sessions = _write_bars(config, "SPY", 3)
+    import spyqqq.chart as chart
+    from datetime import datetime, timedelta
+    import pytz
+    et = pytz.timezone("America/New_York")
+    t0 = et.localize(datetime.combine(datetime.now(et).date(), datetime.min.time()).replace(hour=9, minute=30))
+    from spyqqq import signal as sig
+    bars = [sig.Bar(t0 + timedelta(minutes=5 * i), 510 + i * .01, 510.1 + i * .01, 509.9 + i * .01, 510.05 + i * .01, 1e6)
+            for i in range(20)]
+    monkeypatch.setattr(chart, "_today_bars", lambda sym: bars)
+    w = c.get("/api/why/SPY").get_json()
+    assert w["live"] is True and w["bar"] == bars[-1].ts.strftime("%H:%M") and w["trend"] == "bull"
+    by = {b["setup"]: b for b in w["setups"]}
+    assert set(by) == set(config.SETUPS_ENABLED) | {"trend_pullback", "vwap_momentum"}
+    vm = by["vwap_momentum"]["directions"][0]
+    assert vm["direction"] == "bull" and vm["total"] == 6 and 0 <= vm["passed"] <= 6
+    assert all({"label", "ok", "value", "need"} <= set(ck) for ck in vm["checks"])
+
+
+def test_ledger_api_sorts_by_timestamp_not_file_order(client):
+    c, config = client
+    config.LEDGER_PATH.write_text("\n".join([
+        _row("2026-11-17T11:39:58-05:00", "engine", sym="-", setup="engine", event="shutdown"),
+        _row("2026-11-17T11:31:07-05:00", "engine", sym="-", setup="engine", event="boot"),
+    ]) + "\n")
+    rows = c.get("/api/ledger?day=2026-11-17").get_json()
+    assert [r["event"] for r in rows] == ["boot", "shutdown"]

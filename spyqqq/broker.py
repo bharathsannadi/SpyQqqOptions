@@ -101,9 +101,18 @@ class Broker:
             return False
 
     # ── account / clock ──────────────────────────────────────────────────────
+    def _retry(self, fn):
+        """One retry: an idle keep-alive socket is often reset by the server, so the
+        first call after a quiet spell fails with RemoteDisconnected."""
+        try:
+            return fn()
+        except Exception:
+            _time.sleep(1.0)
+            return fn()
+
     def account(self) -> Optional[dict]:
         try:
-            a = self.trading.get_account()
+            a = self._retry(self.trading.get_account)
             return {"equity": float(a.equity), "cash": float(a.cash),
                     "buying_power": float(a.buying_power),
                     "options_bp": float(getattr(a, "options_buying_power", 0) or 0)}
@@ -112,7 +121,7 @@ class Broker:
 
     def clock(self) -> Optional[dict]:
         try:
-            c = self.trading.get_clock()
+            c = self._retry(self.trading.get_clock)
             return {"is_open": bool(c.is_open), "next_open": c.next_open, "next_close": c.next_close,
                     "now": c.timestamp}
         except Exception as e:
@@ -120,26 +129,31 @@ class Broker:
 
     # ── market data ──────────────────────────────────────────────────────────
     def daily_bars(self, sym: str, days: int = 260) -> list[dict]:
+        """The most recent `days` daily bars. (2026-11-17: `limit` used to cut the
+        response from the OLDEST end, so the cache froze on 2026-10-09 and trend,
+        gap and HV were all five weeks stale.)"""
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
         try:
             req = StockBarsRequest(symbol_or_symbols=sym, timeframe=TimeFrame.Day,
-                                   start=datetime.utcnow() - timedelta(days=int(days * 1.6)),
-                                   limit=days)
-            bars = self.stock_data.get_stock_bars(req)[sym]
+                                   start=datetime.utcnow() - timedelta(days=int(days * 1.6)))
+            bars = sorted(self.stock_data.get_stock_bars(req)[sym], key=lambda b: b.timestamp)[-days:]
             return [{"ts": b.timestamp, "open": b.open, "high": b.high, "low": b.low,
                      "close": b.close, "volume": b.volume} for b in bars]
         except Exception as e:
             log.warning(f"[broker] daily_bars {sym}: {e}"); return []
 
     def intraday_bars(self, sym: str, start: datetime, end: Optional[datetime] = None,
-                      minutes: int = 5) -> list[dict]:
+                      minutes: int = 5, feed: Optional[str] = None) -> list[dict]:
+        """feed=None → account default (SIP; 15-min delayed on the free plan); "iex" → real-time IEX."""
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        from alpaca.data.enums import DataFeed
         try:
             req = StockBarsRequest(symbol_or_symbols=sym,
                                    timeframe=TimeFrame(minutes, TimeFrameUnit.Minute),
-                                   start=start, end=end, limit=10000)
+                                   start=start, end=end, limit=10000,
+                                   **({"feed": DataFeed(feed)} if feed else {}))
             data = self.stock_data.get_stock_bars(req)
             bars = data[sym] if sym in data.data else []
             return [{"ts": b.timestamp, "open": b.open, "high": b.high, "low": b.low,

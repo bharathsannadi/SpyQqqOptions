@@ -36,6 +36,7 @@ TP_PCT                = 0.20     # take profit at +20% of net debit
 SL_PCT                = 0.20     # stop at −20% of net debit
 STALL_MINUTES         = 90       # green-but-stalled (< +5%) after N min → close
 FLATTEN_AT_ET         = time(15, 45)   # nothing held overnight
+REPORT_CATCHUP_AFTER_ET = time(16, 20) # missed-EOD report catch-up (after the 15-min-delayed daily bar)
 # ExitEngine ladder (carried from AlpacaTrader, validated 2026-05-31): breakeven
 # at +5%, trail 30% off HWM, lock +10% at +20%. SL_PCT above is the initial stop.
 EXIT_BE_TRIGGER       = 0.05
@@ -46,6 +47,8 @@ EXIT_FLOOR2_LOCK      = 0.10
 # ── Session windows (ET) ─────────────────────────────────────────────────────
 ENTRY_WINDOW_START_ET = time(10, 5)    # KB §3: never the first 30 min; 10:05 so the 10:00 ET release bar (ISM/JOLTS/UMich) is closed first (BK-3)
 ENTRY_WINDOW_END_ET   = time(12, 30)   # 11:30→12:30 on 2026-11-17 (operator: "best guess" balance; 2025-26 replay ≈107 trades/yr)
+MAX_SIGNAL_AGE_MIN    = 10             # 2026-11-17: refuse a signal whose bar closed > this long ago — on delayed-SIP fallback
+                                         # (or after a sleep) the engine acted ~22 min late; the edge assumes entry at the bar close
 GAP_DELAY_PCT         = 1.0            # |open gap| ≥ this % → entries start 30 min later (TODO #12 gap-day)
 GAP_DELAY_START_ET    = time(10, 30)
 STALE_QUOTE_CLOSE_SEC = 600            # no two-sided spread quote for this long → close at last mid (a dead

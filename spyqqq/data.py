@@ -21,6 +21,7 @@ from .signal import Bar
 log = logging.getLogger(__name__)
 ET = pytz.timezone("America/New_York")
 
+SIP_DELAY_MIN = 16        # free-plan SIP embargo is 15 min; before open+21 min there is no SIP bar to fetch
 HISTORY_DAYS = 1500        # all of it: Polygon seed (2021-06) + Alpaca tail
 
 
@@ -40,6 +41,7 @@ class MarketData:
         self.b = broker
         self._daily: dict[str, tuple[date, list[dict]]] = {}
         self._hist: dict[str, tuple[date, dict[date, list[Bar]]]] = {}
+        self._iex_ratio: dict[str, float] = {}
 
     # ── daily ────────────────────────────────────────────────────────────────
     def daily(self, sym: str) -> list[dict]:
@@ -57,13 +59,21 @@ class MarketData:
                     d = json.loads(line); by_date[d["ts"][:10]] = d
                 except Exception:
                     continue
+        today_s = today.strftime("%Y-%m-%d")
+        # completed sessions only: today's bar is partial and must never be cached or
+        # treated as "yesterday's close" (trend/gap/HV all read the last close)
+        for k in [k for k in by_date if k >= today_s]:
+            del by_date[k]
         fresh = self.b.daily_bars(sym, 260)
         added = 0
         for r in fresh:
             k = _to_et(r["ts"]).strftime("%Y-%m-%d")
-            if k not in by_date:
-                by_date[k] = {"ts": k, "open": r["open"], "high": r["high"], "low": r["low"],
-                              "close": r["close"], "volume": r["volume"]}
+            if k >= today_s:
+                continue
+            row = {"ts": k, "open": r["open"], "high": r["high"], "low": r["low"],
+                   "close": r["close"], "volume": r["volume"]}
+            if by_date.get(k) != row:      # new day, or a vendor correction
+                by_date[k] = row
                 added += 1
         if added and by_date:
             tmp = path.with_suffix(".tmp")
@@ -77,6 +87,10 @@ class MarketData:
             rows.append(d)
         if rows:
             self._daily[sym] = (today, rows)
+            age = (today - rows[-1]["ts"].date()).days
+            if age > 5:
+                log.warning(f"[data] {sym}: last daily close is {age} days old "
+                            f"({rows[-1]['ts']:%Y-%m-%d}) — trend/gap/HV are stale")
         return rows
 
     def daily_closes(self, sym: str, before: Optional[date] = None) -> list[float]:
@@ -102,12 +116,32 @@ class MarketData:
 
     # ── intraday ─────────────────────────────────────────────────────────────
     def today_bars(self, sym: str) -> list[Bar]:
+        """Today's closed 5-min bars, as close to real time as the plan allows.
+
+        The free plan serves SIP (full market) only with a 15-minute delay, so the
+        scanner used to act on bars 15–25 min old. SIP is used up to the delay
+        boundary; the newest bars come from real-time IEX, with volume rescaled to
+        SIP size by the SIP/IEX ratio on today's overlapping bars (IEX is ~1–3% of
+        volume, and vwap_momentum compares volume against SIP-sized history)."""
         now = datetime.now(ET)
         start = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        rows = self.b.intraday_bars(sym, start=start.astimezone(pytz.utc))
-        bars = [_bar(r) for r in rows]
-        # drop the still-forming bar so the rule sees closed bars only
-        cutoff = now - timedelta(minutes=5)
+        cutoff = now - timedelta(minutes=5)                 # drop the still-forming bar
+        # no explicit `end`: Alpaca applies the free-plan embargo itself, whereas an
+        # explicit end near the 15-min boundary is rejected outright
+        sip = [_bar(r) for r in self.b.intraday_bars(sym, start=start.astimezone(pytz.utc))] \
+            if now >= start + timedelta(minutes=SIP_DELAY_MIN + 5) else []
+        iex = [_bar(r) for r in self.b.intraday_bars(sym, start=start.astimezone(pytz.utc), feed="iex")]
+        sip_by_ts = {b.ts: b for b in sip}
+        overlap = [(sip_by_ts[b.ts].volume, b.volume) for b in iex if b.ts in sip_by_ts and b.volume > 0]
+        ratio = (sum(v for v, _ in overlap) / sum(v for _, v in overlap)) if overlap else self._iex_ratio.get(sym)
+        if ratio:
+            self._iex_ratio[sym] = ratio
+        bars = list(sip)
+        last = sip[-1].ts if sip else None
+        if ratio:                                            # without a ratio, stay on (delayed) SIP
+            for b in iex:
+                if last is None or b.ts > last:
+                    bars.append(Bar(b.ts, b.open, b.high, b.low, b.close, b.volume * ratio))
         return [x for x in bars if x.ts <= cutoff and x.ts.time() >= start.time()]
 
     def prev_session_bars(self, sym: str) -> list[Bar]:

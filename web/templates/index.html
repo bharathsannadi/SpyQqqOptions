@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPY / QQQ Desk</title>
 <meta name="color-scheme" content="dark light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/static/app.css?v={{ v }}">
 </head>
 <body>
@@ -17,6 +20,7 @@
     <span class="pill" id="p-conn">—</span>
     <span class="pill" id="p-mkt">—</span>
     <span class="pill bad" id="p-halt" hidden>⛔ HALTED</span>
+      <span class="pill bad" id="p-llm" hidden></span>
     <span class="pill" id="p-age">—</span>
   </div>
   <button class="theme" id="theme" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
@@ -49,6 +53,7 @@
 
 <nav class="tabs" id="tabs" role="tablist">
   <button class="tab on" data-tab="desk" role="tab">Desk</button>
+  <button class="tab" data-tab="chart" role="tab">Chart</button>
   <button class="tab" data-tab="activity" role="tab">Activity <span class="n" id="n-activity" hidden></span></button>
   <button class="tab" data-tab="perf" role="tab">Performance</button>
   <button class="tab" data-tab="report" role="tab">Report</button>
@@ -65,6 +70,49 @@
     <div class="card open-card">
       <div class="card-head"><h2>Open spreads <span class="n" id="n-open" hidden></span></h2><span class="hint">checked every 10 s · ±20% · 90-min stall · ratchet</span></div>
       <div id="open"></div>
+    </div>
+  </section>
+
+  <!-- ── CHART ───────────────────────────────────────────────────────── -->
+  <section class="panel" data-panel="chart">
+    <div class="card chart-card">
+      <div class="card-head">
+        <div class="ch-title">
+          <h2>Price &amp; signals</h2>
+          <div class="chips" id="ch-sym">
+            <button class="chip on" data-sym="SPY">SPY</button>
+            <button class="chip" data-sym="QQQ">QQQ</button>
+          </div>
+          <span class="ch-quote" id="ch-quote"></span>
+        </div>
+        <div class="controls">
+          <div class="chips" id="ch-ind">
+            <button class="chip on" data-ind="vwap">VWAP</button>
+            <button class="chip on" data-ind="ema9">EMA 9</button>
+            <button class="chip" data-ind="ema21">EMA 21</button>
+            <button class="chip on" data-ind="off" title="Show signals from setups switched off in config (comparison only, never traded)">◌ Off setups</button>
+          </div>
+          <select id="ch-day" aria-label="Session"></select>
+        </div>
+      </div>
+      <div class="ch-legend">
+        <span title="Bullish setup fired → call debit spread"><i class="lg buy">▲</i>Buy</span>
+        <span title="Bearish setup fired → put debit spread"><i class="lg sell">▼</i>Sell</span>
+        <span title="Fired outside the entry window — not tradable"><i class="lg dim">▲</i>Off-hours</span>
+        <span title="Fire on the newest ~20 min of bars — real-time IEX data, can change when delayed full-market bars arrive"><i class="lg buy">?</i>Provisional</span>
+        <span title="Trend pullback — switched off in config, shown for comparison only"><i class="lg off">●</i>Not traded</span>
+        <span title="Order filled"><i class="lg fill">●</i>Fill</span>
+        <span title="Position closed (label = P&amp;L)"><i class="lg close">■</i>Exit</span>
+        <span title="Entry window"><i class="lg win"></i>Window</span>
+        <span title="VWAP"><i class="lg ln" style="--c:var(--amber)"></i>VWAP</span>
+        <span title="EMA 9"><i class="lg ln" style="--c:var(--cyan)"></i>EMA 9</span>
+      </div>
+      <div class="ch-wrap">
+        <div id="ch" class="ch"></div>
+        <div id="ch-win" class="ch-win" hidden></div>
+        <div id="ch-empty" class="ch-empty" hidden></div>
+      </div>
+      <div class="ch-sigs" id="ch-sigs"></div>
     </div>
   </section>
 
@@ -115,5 +163,7 @@
 </main>
 
 <script src="/static/app.js?v={{ v }}"></script>
+<script src="/static/vendor/lightweight-charts-4.1.3.js"></script>  <!-- vendored: the chart must work when the internet drops -->
+<script src="/static/chart.js?v={{ v }}"></script>
 </body>
 </html>

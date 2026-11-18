@@ -26,6 +26,17 @@ def entry_window(now: datetime, open_gap_pct: Optional[float] = None) -> tuple[b
                    f"no entries in the first 30 min or after late morning")
 
 
+def signal_fresh(now: datetime, bar_start: datetime, bar_minutes: int = 5) -> tuple[bool, str]:
+    """The historical edge is measured from the signal bar's close. Acting much later
+    (delayed SIP fallback, a sleep/wake, a slow restart) trades a different setup."""
+    age = (now - bar_start).total_seconds() / 60 - bar_minutes
+    lim = config.MAX_SIGNAL_AGE_MIN
+    if age <= lim:
+        return True, f"Signal freshness: bar closed {max(age, 0):.0f} min ago (≤ {lim} min)"
+    return False, (f"Signal freshness: bar closed {age:.0f} min ago (> {lim} min) — late data; "
+                   f"the backtested edge assumes entry at the bar close")
+
+
 def vol_edge_gate(hv5: Optional[float], hv30: Optional[float],
                   iv30: Optional[float]) -> tuple[bool, str]:
     if not config.VOL_EDGE_REQUIRED:

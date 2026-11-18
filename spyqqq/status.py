@@ -7,6 +7,7 @@ import time
 from datetime import datetime
 
 from . import config
+from . import llm as _llm
 
 
 def write_status(engine, clk) -> None:
@@ -30,6 +31,9 @@ def write_status(engine, clk) -> None:
         "next_close": str(clk["next_close"]) if clk else None,
         "account": engine.account,
         "halted": config.HALT_PATH.exists(),
+        # last Claude call failure ("" = fine). With the debate gate ON it fails CLOSED on
+        # this, silently blocking every entry; with it OFF only the EOD review is lost
+        "llm_error": _llm.last_error,
         "day": {"date": engine.day.date, "trades": engine.day.trades,
                 "debit_spent_usd": round(engine.day.debit_spent_usd, 2),
                 "realized_usd": round(engine.day.realized_usd, 2),
