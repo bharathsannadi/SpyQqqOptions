@@ -222,3 +222,20 @@ def test_login_locks_out_after_five_failures(client, monkeypatch):
         c.post("/login", data={"password": "x"}, headers={"X-Forwarded-For": "100.64.0.7"})
     r = c.post("/login", data={"password": "correct horse battery"}, headers={"X-Forwarded-For": "100.64.0.7"})
     assert r.status_code == 200 and b"Too many" in r.data
+
+
+def test_lockout_uses_proxy_appended_ip_and_global_cap(client, monkeypatch):
+    c, _ = client
+    import spyqqq.web as web
+    web._FAILS.clear()
+    monkeypatch.setenv("SPYQQQ_DASHBOARD_PASSWORD_HASH", _hash("correct horse battery"))
+    for k in range(5):     # attacker rotates the claimed (leftmost) address; the proxy's stays the same
+        c.post("/login", data={"password": "x"}, headers={"X-Forwarded-For": f"10.0.0.{k}, 203.0.113.9"})
+    r = c.post("/login", data={"password": "correct horse battery"}, headers={"X-Forwarded-For": "1.1.1.1, 203.0.113.9"})
+    assert b"Too many" in r.data
+    web._FAILS.clear()
+    for k in range(20):    # many real addresses → global cap
+        c.post("/login", data={"password": "x"}, headers={"X-Forwarded-For": f"198.51.100.{k}"})
+    r = c.post("/login", data={"password": "correct horse battery"}, headers={"X-Forwarded-For": "192.0.2.1"})
+    assert b"Too many" in r.data
+    web._FAILS.clear()

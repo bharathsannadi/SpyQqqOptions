@@ -37,7 +37,10 @@ def _pw_hash() -> str:
 
 
 def _client_ip() -> str:
-    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?")
+    """The RIGHTMOST X-Forwarded-For entry is the one Tailscale Serve/Funnel appended; the
+    leftmost is whatever the client claimed — trusting it let a guesser dodge the lockout."""
+    xff = [p.strip() for p in request.headers.get("X-Forwarded-For", "").split(",") if p.strip()]
+    return xff[-1] if xff else (request.remote_addr or "?")
 
 
 def _is_proxied() -> bool:
@@ -47,9 +50,15 @@ def _is_proxied() -> bool:
 
 
 def _locked_out(ip: str) -> bool:
+    """5 failures per client, and 20 across everyone, per 15 min. The page is public under
+    Tailscale Funnel; the global cap stops a guesser spread over many addresses (the cost:
+    an attack can lock the owner out for 15 min too — acceptable for a read-only dashboard)."""
     now = time.time()
-    _FAILS[ip] = [t for t in _FAILS.get(ip, []) if now - t < 900]
-    return len(_FAILS[ip]) >= 5
+    for k in list(_FAILS):
+        _FAILS[k] = [t for t in _FAILS[k] if now - t < 900]
+        if not _FAILS[k]:
+            del _FAILS[k]
+    return len(_FAILS.get(ip, [])) >= 5 or sum(map(len, _FAILS.values())) >= 20
 
 
 @app.before_request
@@ -72,6 +81,8 @@ def _headers(resp):
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.headers.get("X-Forwarded-Proto") == "https":
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     if request.path.startswith("/api/") or request.endpoint == "index":
         resp.headers["Cache-Control"] = "no-store"
     return resp
