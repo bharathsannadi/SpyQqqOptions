@@ -13,6 +13,7 @@ def client(tmp_path, monkeypatch):
     state, reports = tmp_path / "state", tmp_path / "reports"
     monkeypatch.setenv("SPYQQQ_STATE_DIR", str(state))
     monkeypatch.setenv("SPYQQQ_REPORT_DIR", str(reports))
+    monkeypatch.delenv("SPYQQQ_DASHBOARD_PASSWORD_HASH", raising=False)   # the real .env has one; auth tests set their own
     import spyqqq
     for m in ("spyqqq.web", "spyqqq.report", "spyqqq.ledger", "spyqqq.chart", "spyqqq.config"):
         sys.modules.pop(m, None)
