@@ -6,13 +6,105 @@ import json
 from collections import defaultdict
 from datetime import datetime
 
-from flask import Flask, jsonify, render_template, request
+import os
+import secrets
+import time
+from datetime import timedelta
+
+from flask import Flask, jsonify, redirect, render_template, request, session
 
 from . import config, report
 from .ledger import Ledger
 
 app = Flask(__name__, template_folder=str(config.ROOT / "web" / "templates"),
             static_folder=str(config.ROOT / "web" / "static"))
+# a stable key keeps logins across restarts; without one, logins just reset on restart
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
+                  PERMANENT_SESSION_LIFETIME=timedelta(days=30))
+
+
+# ── auth ─────────────────────────────────────────────────────────────────────
+# The dashboard shows account equity, the broker key prefix and every decision. It is
+# reached remotely only through Tailscale Serve (Flask stays on 127.0.0.1), and a
+# password is required on top of that. No password set → remote requests are refused.
+_FAILS: dict[str, list[float]] = {}
+_OPEN = {"login", "logout", "health"}
+
+
+def _pw_hash() -> str:
+    return os.environ.get("SPYQQQ_DASHBOARD_PASSWORD_HASH", "").strip()
+
+
+def _client_ip() -> str:
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?")
+
+
+def _is_proxied() -> bool:
+    """Tailscale Serve (and any reverse proxy) forwards from 127.0.0.1 but adds these."""
+    return bool(request.headers.get("X-Forwarded-For") or request.headers.get("Tailscale-User-Login")
+                or request.remote_addr not in ("127.0.0.1", "::1"))
+
+
+def _locked_out(ip: str) -> bool:
+    now = time.time()
+    _FAILS[ip] = [t for t in _FAILS.get(ip, []) if now - t < 900]
+    return len(_FAILS[ip]) >= 5
+
+
+@app.before_request
+def _require_login():
+    if request.endpoint in _OPEN:
+        return None
+    if not _pw_hash():
+        if _is_proxied():
+            return ("Dashboard password not set — run `spyqqq set-password` on the Mac.", 503)
+        return None                                  # local-only use without a password keeps working
+    if session.get("auth"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "login required"}), 401
+    return redirect("/login")
+
+
+@app.after_request
+def _headers(resp):
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.path.startswith("/api/") or request.endpoint == "index":
+        resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    from werkzeug.security import check_password_hash
+    err = ""
+    if request.method == "POST":
+        ip = _client_ip()
+        if _locked_out(ip):
+            err = "Too many attempts — wait 15 minutes."
+        elif _pw_hash() and check_password_hash(_pw_hash(), request.form.get("password", "")):
+            session.clear(); session.permanent = True; session["auth"] = True
+            _FAILS.pop(ip, None)
+            return redirect("/")
+        else:
+            _FAILS.setdefault(ip, []).append(time.time())
+            err = "Wrong password."
+            app.logger.warning(f"[web] failed dashboard login from {ip}")
+    return render_template("login.html", err=err, configured=bool(_pw_hash()))
+
+
+@app.post("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 def _asset_version() -> int:

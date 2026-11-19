@@ -183,3 +183,41 @@ def test_ledger_api_sorts_by_timestamp_not_file_order(client):
     ]) + "\n")
     rows = c.get("/api/ledger?day=2026-11-17").get_json()
     assert [r["event"] for r in rows] == ["boot", "shutdown"]
+
+
+def _hash(pw):
+    from werkzeug.security import generate_password_hash
+    return generate_password_hash(pw)
+
+
+def test_no_password_local_ok_remote_refused(client, monkeypatch):
+    c, _ = client
+    monkeypatch.delenv("SPYQQQ_DASHBOARD_PASSWORD_HASH", raising=False)
+    assert c.get("/").status_code == 200
+    assert c.get("/", headers={"X-Forwarded-For": "100.64.0.9"}).status_code == 503
+    assert c.get("/api/ledger", environ_base={"REMOTE_ADDR": "192.168.1.5"}).status_code == 503
+
+
+def test_password_gates_pages_and_api(client, monkeypatch):
+    c, _ = client
+    monkeypatch.setenv("SPYQQQ_DASHBOARD_PASSWORD_HASH", _hash("correct horse battery"))
+    assert c.get("/").status_code == 302 and c.get("/").headers["Location"].endswith("/login")
+    assert c.get("/api/ledger").status_code == 401
+    assert c.get("/health").status_code == 200
+    assert c.post("/login", data={"password": "nope"}).status_code == 200          # re-shows form
+    assert c.get("/api/ledger").status_code == 401
+    r = c.post("/login", data={"password": "correct horse battery"})
+    assert r.status_code == 302
+    assert c.get("/api/ledger").status_code == 200
+    assert c.get("/").headers.get("X-Frame-Options") == "SAMEORIGIN"
+    c.post("/logout")
+    assert c.get("/api/ledger").status_code == 401
+
+
+def test_login_locks_out_after_five_failures(client, monkeypatch):
+    c, _ = client
+    monkeypatch.setenv("SPYQQQ_DASHBOARD_PASSWORD_HASH", _hash("correct horse battery"))
+    for _ in range(5):
+        c.post("/login", data={"password": "x"}, headers={"X-Forwarded-For": "100.64.0.7"})
+    r = c.post("/login", data={"password": "correct horse battery"}, headers={"X-Forwarded-For": "100.64.0.7"})
+    assert r.status_code == 200 and b"Too many" in r.data

@@ -9,6 +9,7 @@ flatten       ask the running engine to close everything now (via HALT+FLATTEN f
 report [date] print (and regenerate) a daily report
 history       the historical confidence table
 web           start the read-only dashboard on :5050
+set-password  set the dashboard login password (stored hashed in .env)
 """
 from __future__ import annotations
 
@@ -180,6 +181,25 @@ def cmd_web(a):
     app.run(host="127.0.0.1", port=a.port, debug=False)
 
 
+def cmd_set_password(a):
+    """Prompted, never echoed, stored only as a salted hash in .env. Restart the web
+    agent afterwards (launchctl kickstart -k gui/$UID/com.spyqqq.web)."""
+    import getpass, os, re
+    from werkzeug.security import generate_password_hash
+    pw = getpass.getpass("New dashboard password (min 12 chars): ")
+    if len(pw) < 12:
+        sys.exit("too short — use at least 12 characters")
+    if getpass.getpass("Repeat: ") != pw:
+        sys.exit("passwords differ")
+    env = config.ROOT / ".env"
+    text = env.read_text() if env.exists() else ""
+    line = f"SPYQQQ_DASHBOARD_PASSWORD_HASH='{generate_password_hash(pw)}'"
+    pat = re.compile(r"^SPYQQQ_DASHBOARD_PASSWORD_HASH=.*$", re.M)
+    text = pat.sub(line, text) if pat.search(text) else text.rstrip("\n") + "\n" + line + "\n"
+    env.write_text(text); os.chmod(env, 0o600)
+    print("saved — now restart the dashboard: launchctl kickstart -k gui/$(id -u)/com.spyqqq.web")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="spyqqq")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -190,6 +210,7 @@ def main(argv=None):
     sub.add_parser("resume").set_defaults(f=cmd_resume)
     rp = sub.add_parser("report"); rp.add_argument("date", nargs="?"); rp.set_defaults(f=cmd_report)
     sub.add_parser("history").set_defaults(f=cmd_history)
+    sub.add_parser("set-password").set_defaults(f=cmd_set_password)
     w = sub.add_parser("web"); w.add_argument("--port", type=int, default=5050); w.set_defaults(f=cmd_web)
     a = p.parse_args(argv)
     a.f(a)

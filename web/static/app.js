@@ -1,3 +1,6 @@
+// session expired / signed out → back to the login page (covers chart.js too)
+{ const f = window.fetch.bind(window);
+  window.fetch = async (...a) => { const r = await f(...a); if (r.status === 401) location.href = '/login'; return r; }; }
 /* SPY/QQQ desk — read-only dashboard. Polls /api/status every 15 s, /api/ledger + /api/summary
    every 30 s, /api/reports every 5 min. All rendering is from those three payloads. */
 (() => {
